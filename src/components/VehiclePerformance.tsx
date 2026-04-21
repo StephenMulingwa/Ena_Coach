@@ -6,6 +6,7 @@ import DateFilter from "./DateFilter";
 import type { SharedTabProps } from "../lib/data";
 import { CornerDownRight, Truck } from "lucide-react";
 import * as XLSX from "xlsx";
+import { aliasDriverName, buildDriverAliasMap } from "../lib/driverAlias";
 
 function makeTimestamp() {
   const now = new Date();
@@ -31,6 +32,10 @@ export default function VehiclePerformancePage({
   const drivers = data?.drivers ?? [];
   const vehiclePerformance = data?.vehiclePerformance ?? [];
   const [expandedVehicle, setExpandedVehicle] = useState<string | null>(null);
+  const driverAliasMap = useMemo(
+    () => buildDriverAliasMap([...drivers.map((d) => d.name), ...vehiclePerformance.flatMap((v) => v.drivers.map((dd) => dd.driverName))]),
+    [drivers, vehiclePerformance],
+  );
 
   const perfByVehicle = useMemo(() => {
     const map = new Map<string, (typeof vehiclePerformance)[number]>();
@@ -54,29 +59,27 @@ export default function VehiclePerformancePage({
         engineHours: d.engineRunningTime,
       });
       const perf = perfByVehicle.get(d.vehicle);
-      if (expandedVehicle === d.vehicle) {
-        for (const dd of perf?.drivers ?? []) {
-          const summaryDriver =
-            drivers.find((drv) => drv.name === dd.driverName) ??
-            drivers.find((drv) => drv.vehicle === d.vehicle) ??
-            d;
-          rows.push({
-            level: "Driver Detail",
-            name: dd.driverName,
-            distanceKm: dd.distanceKm,
-            consumedFuelL: dd.consumptionLitres,
-            consumptionKmPerL: dd.consumptionKmPerL.toFixed(2),
-            totalFillings: summaryDriver.totalFillings,
-            totalFilledL: summaryDriver.fuelFilled,
-            totalDrainedL: summaryDriver.fuelDrained,
-            avgSpeedKmH: summaryDriver.avgSpeed,
-            engineHours: summaryDriver.engineRunningTime,
-          });
-        }
+      for (const dd of perf?.drivers ?? []) {
+        const summaryDriver =
+          drivers.find((drv) => drv.name === dd.driverName) ??
+          drivers.find((drv) => drv.vehicle === d.vehicle) ??
+          d;
+        rows.push({
+          level: "Driver Detail",
+          name: aliasDriverName(dd.driverName, driverAliasMap),
+          distanceKm: dd.distanceKm,
+          consumedFuelL: dd.consumptionLitres,
+          consumptionKmPerL: dd.consumptionKmPerL.toFixed(2),
+          totalFillings: summaryDriver.totalFillings,
+          totalFilledL: summaryDriver.fuelFilled,
+          totalDrainedL: summaryDriver.fuelDrained,
+          avgSpeedKmH: summaryDriver.avgSpeed,
+          engineHours: summaryDriver.engineRunningTime,
+        });
       }
     }
     return rows;
-  }, [drivers, perfByVehicle, expandedVehicle]);
+  }, [drivers, perfByVehicle, driverAliasMap]);
 
   const downloadVehiclePerformanceXlsx = () => {
     const rows = vehicleRowsForDownload.map((row) => ({
@@ -201,9 +204,9 @@ export default function VehiclePerformancePage({
                             </td>
                             <td style={{ padding: "8px 14px", display: "flex", alignItems: "center", gap: "8px", paddingLeft: "20px" }}>
                               <div style={{ width: "26px", height: "26px", borderRadius: "50%", background: "var(--blue)", color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontSize: ".72rem", fontWeight: 800 }}>
-                                {dd.driverName.charAt(0)}
+                                {aliasDriverName(dd.driverName, driverAliasMap).split(" ").slice(-1)[0]?.charAt(0) ?? "D"}
                               </div>
-                              <span style={{ fontWeight: 800 }}>{dd.driverName}</span>
+                              <span style={{ fontWeight: 800 }}>{aliasDriverName(dd.driverName, driverAliasMap)}</span>
                             </td>
                             <td style={{ padding: "8px 14px", textAlign: "right" }}>{dd.distanceKm.toLocaleString()}</td>
                             <td style={{ padding: "8px 14px", textAlign: "right" }}>{dd.consumptionLitres.toLocaleString()}</td>

@@ -14,6 +14,7 @@ import {
 import PageHeader from "./PageHeader";
 import DateFilter from "./DateFilter";
 import { VIOLATION_TYPES, type SharedTabProps, type VehicleLocation } from "../lib/data";
+import { aliasDriverName, buildDriverAliasMap } from "../lib/driverAlias";
 
 const COLORS = ["#ef4444", "#f59e0b", "#3b82f6", "#10b981", "#8b5cf6"];
 
@@ -37,6 +38,15 @@ export default function Dashboard({
   const filteredViolations = data?.violations ?? [];
   const reportRows = data?.finalReport ?? [];
   const vehicleRows = data?.vehiclePerformance ?? [];
+  const driverAliasMap = useMemo(
+    () => buildDriverAliasMap([
+      ...drivers.map((d) => d.name),
+      ...filteredViolations.map((v) => v.driver),
+      ...reportRows.map((r) => r.driver),
+      ...(data?.vehicleLocations ?? []).map((v) => v.driver),
+    ]),
+    [drivers, filteredViolations, reportRows, data?.vehicleLocations],
+  );
 
   const violationSummary = VIOLATION_TYPES.map((vt) => ({
     name: vt,
@@ -57,13 +67,13 @@ export default function Dashboard({
     for (const vt of VIOLATION_TYPES) {
       item[vt] = filteredViolations.filter((v) => v.driver === d.name && v.violation === vt).length;
     }
-    acc[d.name] = item;
+    acc[aliasDriverName(d.name, driverAliasMap)] = item;
     return acc;
   }, {});
 
   const vehicleLocations = (data?.vehicleLocations ?? []).map((loc: VehicleLocation) => ({
     vehicle: loc.vehicle,
-    driver: loc.driver,
+    driver: aliasDriverName(loc.driver, driverAliasMap),
     lastLocation: loc.location || "Unknown",
     lastSeen: loc.lastCoordinatesTime || loc.lastMessageTime || "N/A",
     coords: loc.locationCoords || loc.location,

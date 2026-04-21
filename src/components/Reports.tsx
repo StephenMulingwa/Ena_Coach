@@ -5,6 +5,7 @@ import PageHeader from "./PageHeader";
 import DateFilter from "./DateFilter";
 import type { FinalReportRow, SharedTabProps } from "../lib/data";
 import * as XLSX from "xlsx";
+import { aliasDriverName, buildDriverAliasMap } from "../lib/driverAlias";
 
 function makeTimestamp() {
   const now = new Date();
@@ -62,11 +63,11 @@ type ReportRow = FinalReportRow & {
   fuelDrainsCount: number;
 };
 
-function downloadXlsx(rows: ReportRow[]) {
+function downloadXlsx(rows: ReportRow[], getAlias: (name: string) => string) {
   const exportRows = rows.map((row) =>
     columns.reduce<Record<string, string | number>>((acc, c) => {
       const val = row[c.key as keyof typeof row];
-      acc[c.label] = val ?? "";
+      acc[c.label] = c.key === "driver" ? getAlias(String(val ?? "")) : (val ?? "");
       return acc;
     }, {}),
   );
@@ -148,6 +149,15 @@ export default function Reports({
       };
     });
   }, [data]);
+  const driverAliasMap = useMemo(
+    () => buildDriverAliasMap([
+      ...(data?.drivers ?? []).map((d) => d.name),
+      ...(data?.finalReport ?? []).map((r) => r.driver),
+      ...(data?.violations ?? []).map((v) => v.driver),
+    ]),
+    [data],
+  );
+  const getAlias = (name: string) => aliasDriverName(name, driverAliasMap);
   const zeroDecimalKeys = new Set(["distanceKm", "avgSpeedKmH", "fuelConsumptionDiesel"]);
   const percentageKeys = new Set([
     "harshCorneringPer100",
@@ -187,7 +197,7 @@ export default function Reports({
               running={loading}
             />
             <button
-              onClick={() => downloadXlsx(rows)}
+              onClick={() => downloadXlsx(rows, getAlias)}
               style={{
                 padding: "8px 14px",
                 background: "rgba(22,163,74,0.1)",
@@ -232,7 +242,7 @@ export default function Reports({
                         : typeof val === "number"
                           ? val.toFixed(2)
                           : String(val);
-                    return <td key={c.key} style={{ padding: "10px 12px" }}>{displayValue}</td>;
+                    return <td key={c.key} style={{ padding: "10px 12px" }}>{c.key === "driver" ? getAlias(String(displayValue)) : displayValue}</td>;
                   })}
                 </tr>
               ))}

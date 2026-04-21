@@ -10,6 +10,7 @@ import {
 } from "../lib/data";
 import type { ViolationRecord } from "../lib/data";
 import * as XLSX from "xlsx";
+import { aliasDriverName, buildDriverAliasMap } from "../lib/driverAlias";
 
 const MONITORING_PAGE_SIZE = 10;
 
@@ -19,7 +20,7 @@ function toDate(value: string) {
   return new Date(yyyy, mm - 1, dd);
 }
 
-function exportMonitoringCSV(rows: ViolationRecord[]) {
+function exportMonitoringCSV(rows: ViolationRecord[], getAlias: (name: string) => string) {
   const cols = [
     "Driver",
     "Vehicle",
@@ -37,7 +38,7 @@ function exportMonitoringCSV(rows: ViolationRecord[]) {
   const body = rows
     .map((r) =>
       [
-        r.driver,
+        getAlias(r.driver),
         r.vehicle,
         r.violation,
         r.beginning,
@@ -63,9 +64,9 @@ function exportMonitoringCSV(rows: ViolationRecord[]) {
   URL.revokeObjectURL(url);
 }
 
-function toSheetRows(rows: ViolationRecord[]) {
+function toSheetRows(rows: ViolationRecord[], getAlias: (name: string) => string) {
   return rows.map((r) => ({
-    Driver: r.driver,
+    Driver: getAlias(r.driver),
     Vehicle: r.vehicle,
     Violation: r.violation,
     Beginning: r.beginning,
@@ -83,6 +84,7 @@ function exportAllViolationsWorkbook(
   start: string,
   end: string,
   violations: ViolationRecord[],
+  getAlias: (name: string) => string,
 ) {
   const workbook = XLSX.utils.book_new();
   const s = new Date(start);
@@ -94,7 +96,7 @@ function exportAllViolationsWorkbook(
       const d = toDate(r.beginning);
       return d >= s && d <= e && r.violation === violationType;
     });
-    const worksheet = XLSX.utils.json_to_sheet(toSheetRows(rows));
+    const worksheet = XLSX.utils.json_to_sheet(toSheetRows(rows, getAlias));
     XLSX.utils.book_append_sheet(workbook, worksheet, violationType.slice(0, 31));
   }
 
@@ -116,6 +118,11 @@ export default function Monitoring({
   const [currentPage, setCurrentPage] = useState(1);
   const records = data?.violations ?? [];
   const drivers = data?.drivers ?? [];
+  const driverAliasMap = useMemo(
+    () => buildDriverAliasMap([...drivers.map((d) => d.name), ...records.map((r) => r.driver)]),
+    [drivers, records],
+  );
+  const getAlias = (name: string) => aliasDriverName(name, driverAliasMap);
 
   const dateFiltered = useMemo(
     () => records.filter((r) => r.violation === activeViolation),
@@ -202,13 +209,13 @@ export default function Monitoring({
           <select value={driverFilter} onChange={(e) => setDriverFilter(e.target.value)} style={selectStyle}>
             <option value="All">All Drivers</option>
             {drivers.map((d) => (
-              <option key={d.id} value={d.name}>{d.name}</option>
+              <option key={d.id} value={d.name}>{getAlias(d.name)}</option>
             ))}
           </select>
         </div>
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <button
-            onClick={() => exportMonitoringCSV(filtered)}
+            onClick={() => exportMonitoringCSV(filtered, getAlias)}
             style={{
               padding: "6px 10px",
               borderRadius: "var(--radius-sm)",
@@ -223,7 +230,7 @@ export default function Monitoring({
             Download Filtered Violation
           </button>
           <button
-            onClick={() => exportAllViolationsWorkbook(startDate, endDate, records)}
+            onClick={() => exportAllViolationsWorkbook(startDate, endDate, records, getAlias)}
             style={{
               padding: "6px 10px",
               borderRadius: "var(--radius-sm)",
@@ -263,7 +270,7 @@ export default function Monitoring({
                     <td style={{ padding: "10px 14px", color: "var(--text3)" }}>
                       {(currentPage - 1) * MONITORING_PAGE_SIZE + idx + 1}
                     </td>
-                    <td style={{ padding: "10px 14px", fontWeight: 600 }}>{r.driver}</td>
+                    <td style={{ padding: "10px 14px", fontWeight: 600 }}>{getAlias(r.driver)}</td>
                     <td style={{ padding: "10px 14px" }}>{r.vehicle}</td>
                     <td style={{ padding: "10px 14px", color: "var(--text2)", fontFamily: "var(--font-mono)", fontSize: ".72rem" }}>{r.beginning}</td>
                     <td style={{ padding: "10px 14px" }}>

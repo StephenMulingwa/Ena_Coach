@@ -5,6 +5,7 @@ import PageHeader from "./PageHeader";
 import DateFilter from "./DateFilter";
 import type { FuelRecord, SharedTabProps } from "../lib/data";
 import * as XLSX from "xlsx";
+import { aliasDriverName, buildDriverAliasMap } from "../lib/driverAlias";
 
 function getValue(record: FuelRecord, keys: string[]) {
   const entries = Object.entries(record.columns ?? {});
@@ -46,6 +47,32 @@ function downloadTableXlsx(baseName: string, headers: string[], rows: Array<Arra
   XLSX.writeFile(book, `${baseName}_${makeTimestamp()}.xlsx`);
 }
 
+function downloadFuelWorkbook(
+  fillingsRows: Array<Array<string | number>>,
+  drainRows: Array<Array<string | number>>,
+) {
+  const book = XLSX.utils.book_new();
+  const fillingsHeaders = ["#", "Vehicle", "Driver", "Filling date", "Location", "Initial fuel level", "Final fuel level", "Fuel Filled"];
+  const drainsHeaders = ["#", "Vehicle", "Driver", "Drain time", "Location", "Initial fuel level", "Final fuel level", "Fuel Drained"];
+
+  const fillingsSheetRows = fillingsRows.map((row) =>
+    fillingsHeaders.reduce<Record<string, string | number>>((acc, header, idx) => {
+      acc[header] = row[idx] ?? "";
+      return acc;
+    }, {}),
+  );
+  const drainsSheetRows = drainRows.map((row) =>
+    drainsHeaders.reduce<Record<string, string | number>>((acc, header, idx) => {
+      acc[header] = row[idx] ?? "";
+      return acc;
+    }, {}),
+  );
+
+  XLSX.utils.book_append_sheet(book, XLSX.utils.json_to_sheet(fillingsSheetRows), "Fuel Fillings");
+  XLSX.utils.book_append_sheet(book, XLSX.utils.json_to_sheet(drainsSheetRows), "Fuel Drains");
+  XLSX.writeFile(book, `fuel_operations_${makeTimestamp()}.xlsx`);
+}
+
 function FuelFillingsTable({
   rows,
   page,
@@ -53,6 +80,7 @@ function FuelFillingsTable({
   allRows,
   totalFilled,
   onDownloadXlsx,
+  getDriverAlias,
   onPrev,
   onNext,
 }: {
@@ -62,6 +90,7 @@ function FuelFillingsTable({
   allRows: FuelRecord[];
   totalFilled: number;
   onDownloadXlsx: () => void;
+  getDriverAlias: (name: string) => string;
   onPrev: () => void;
   onNext: () => void;
 }) {
@@ -114,7 +143,7 @@ function FuelFillingsTable({
                 <tr key={row.id} style={{ borderBottom: "1px solid var(--border)" }}>
                   <td style={{ padding: "10px 12px" }}>{idx + 1}</td>
                   <td style={{ padding: "10px 12px", fontWeight: 700 }}>{row.vehicle || row.grouping}</td>
-                  <td style={{ padding: "10px 12px" }}>{getValue(row, ["Driver"]) || row.driver || "—"}</td>
+                  <td style={{ padding: "10px 12px" }}>{getDriverAlias(getValue(row, ["Driver"]) || row.driver || "")}</td>
                   <td style={{ padding: "10px 12px", fontFamily: "var(--font-mono)", fontSize: ".72rem" }}>
                     {getValue(row, ["Filling or charge time"])}
                   </td>
@@ -211,6 +240,7 @@ function FuelDrainsTable({
   allRows,
   totalDrained,
   onDownloadXlsx,
+  getDriverAlias,
   onPrev,
   onNext,
 }: {
@@ -220,6 +250,7 @@ function FuelDrainsTable({
   allRows: FuelRecord[];
   totalDrained: number;
   onDownloadXlsx: () => void;
+  getDriverAlias: (name: string) => string;
   onPrev: () => void;
   onNext: () => void;
 }) {
@@ -240,13 +271,13 @@ function FuelDrainsTable({
   return (
     <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius)", overflow: "hidden", boxShadow: "var(--shadow)" }}>
       <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)", fontWeight: 700, color: "var(--text)" }}>
-        Fuel Drains <span style={{ color: "#15803d", fontWeight: 800 }}>({allRows.length} drains | {totalDrained.toFixed(2)} L total)</span>
+        Fuel Drains <span style={{ color: "var(--red)", fontWeight: 800 }}>({allRows.length} drains | {totalDrained.toFixed(2)} L total)</span>
       </div>
       <div style={{ overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: ".8rem", minWidth: "1200px" }}>
           <thead>
             <tr style={{ background: "var(--surface2)", borderBottom: "1px solid var(--border2)" }}>
-              {["#", "Vehicle", "Driver", "Location", "Drain time", "Final location", "Drained", "Final fuel level"].map((h) => (
+              {["#", "Vehicle", "Driver", "Drain time", "Location", "Initial fuel level", "Final fuel level", "Fuel Drained"].map((h) => (
                 <th key={h} style={thStyle}>{h}</th>
               ))}
             </tr>
@@ -263,7 +294,8 @@ function FuelDrainsTable({
                 <tr key={row.id} style={{ borderBottom: "1px solid var(--border)" }}>
                   <td style={{ padding: "10px 12px" }}>{idx + 1}</td>
                   <td style={{ padding: "10px 12px", fontWeight: 700 }}>{row.vehicle || row.grouping}</td>
-                  <td style={{ padding: "10px 12px" }}>{getValue(row, ["Driver"]) || row.driver || "—"}</td>
+                  <td style={{ padding: "10px 12px" }}>{getDriverAlias(getValue(row, ["Driver"]) || row.driver || "")}</td>
+                  <td style={{ padding: "10px 12px", fontFamily: "var(--font-mono)", fontSize: ".72rem" }}>{getValue(row, ["Drain time"]) || "—"}</td>
                   <td style={{ padding: "10px 12px" }}>
                     <a
                       href={`https://www.google.com/maps?q=${encodeURIComponent(row.locationCoords || getValue(row, ["Initial location"]) || row.location)}`}
@@ -274,19 +306,9 @@ function FuelDrainsTable({
                       {getValue(row, ["Initial location"]) || "—"}
                     </a>
                   </td>
-                  <td style={{ padding: "10px 12px", fontFamily: "var(--font-mono)", fontSize: ".72rem" }}>{getValue(row, ["Drain time"]) || "—"}</td>
-                  <td style={{ padding: "10px 12px" }}>
-                    <a
-                      href={`https://www.google.com/maps?q=${encodeURIComponent(row.locationCoords || getValue(row, ["Final location"]) || row.location)}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{ color: "var(--blue)", textDecoration: "none", fontWeight: 600 }}
-                    >
-                      {getValue(row, ["Final location"]) || "—"}
-                    </a>
-                  </td>
-                  <td style={{ padding: "10px 12px" }}>{getValue(row, ["Drained"]) || "—"}</td>
+                  <td style={{ padding: "10px 12px" }}>{getValue(row, ["Initial fuel level"]) || "—"}</td>
                   <td style={{ padding: "10px 12px" }}>{getValue(row, ["Final fuel level"]) || "—"}</td>
+                  <td style={{ padding: "10px 12px" }}>{getValue(row, ["Drained"]) || "—"}</td>
                 </tr>
               ))
             )}
@@ -366,6 +388,14 @@ export default function Fuel({ data, loading, error, startDate, endDate, onStart
   const [selectedVehicle, setSelectedVehicle] = useState("ALL");
   const [fillingsPage, setFillingsPage] = useState(0);
   const [drainsPage, setDrainsPage] = useState(0);
+  const driverAliasMap = useMemo(
+    () => buildDriverAliasMap([
+      ...fuelFillings.map((r) => getValue(r, ["Driver"]) || r.driver),
+      ...fuelDrains.map((r) => getValue(r, ["Driver"]) || r.driver),
+    ]),
+    [fuelFillings, fuelDrains],
+  );
+  const getDriverAlias = (name: string) => aliasDriverName(name, driverAliasMap);
 
   const vehicleOptions = useMemo(() => {
     const fromFillings = fuelFillings.map((r) => r.vehicle).filter(Boolean);
@@ -429,6 +459,30 @@ export default function Fuel({ data, loading, error, startDate, endDate, onStart
     [filteredFillings, safeFillingsPage],
   );
 
+  const downloadAllFuelSheets = () =>
+    downloadFuelWorkbook(
+      filteredFillings.map((row, idx) => [
+        idx + 1,
+        row.vehicle || row.grouping,
+        getDriverAlias(getValue(row, ["Driver"]) || row.driver || ""),
+        getValue(row, ["Filling or charge time"]),
+        row.location || "—",
+        getValue(row, ["Initial fuel level"]) || "—",
+        getValue(row, ["Final fuel level"]) || "—",
+        getValue(row, ["Filled"]) || "—",
+      ]),
+      filteredDrains.map((row, idx) => [
+        idx + 1,
+        row.vehicle || row.grouping,
+        getDriverAlias(getValue(row, ["Driver"]) || row.driver || ""),
+        getValue(row, ["Drain time"]) || "—",
+        getValue(row, ["Initial location"]) || "—",
+        getValue(row, ["Initial fuel level"]) || "—",
+        getValue(row, ["Final fuel level"]) || "—",
+        getValue(row, ["Drained"]) || "—",
+      ]),
+    );
+
   return (
     <div>
       <PageHeader
@@ -483,6 +537,21 @@ export default function Fuel({ data, loading, error, startDate, endDate, onStart
             </option>
           ))}
         </select>
+        <button
+          onClick={downloadAllFuelSheets}
+          style={{
+            padding: "6px 10px",
+            fontSize: ".75rem",
+            borderRadius: "var(--radius-sm)",
+            border: "1px solid rgba(47,111,237,0.35)",
+            background: "rgba(47,111,237,0.1)",
+            color: "var(--blue)",
+            fontWeight: 700,
+            cursor: "pointer",
+          }}
+        >
+          Download All
+        </button>
       </div>
 
       <div style={{ display: "grid", gap: "16px" }}>
@@ -492,6 +561,7 @@ export default function Fuel({ data, loading, error, startDate, endDate, onStart
           totalRows={filteredFillings.length}
           allRows={filteredFillings}
           totalFilled={totalFilledLitres}
+          getDriverAlias={getDriverAlias}
           onDownloadXlsx={() =>
             downloadTableXlsx(
               "fuel_fillings",
@@ -499,7 +569,7 @@ export default function Fuel({ data, loading, error, startDate, endDate, onStart
               filteredFillings.map((row, idx) => [
                 idx + 1,
                 row.vehicle || row.grouping,
-                getValue(row, ["Driver"]) || row.driver || "—",
+                getDriverAlias(getValue(row, ["Driver"]) || row.driver || ""),
                 getValue(row, ["Filling or charge time"]),
                 row.location || "—",
                 getValue(row, ["Initial fuel level"]) || "—",
@@ -522,19 +592,20 @@ export default function Fuel({ data, loading, error, startDate, endDate, onStart
           totalRows={filteredDrains.length}
           allRows={filteredDrains}
           totalDrained={totalDrainedLitres}
+          getDriverAlias={getDriverAlias}
           onDownloadXlsx={() =>
             downloadTableXlsx(
               "fuel_drains",
-              ["#", "Vehicle", "Driver", "Location", "Drain time", "Final location", "Drained", "Final fuel level"],
+              ["#", "Vehicle", "Driver", "Drain time", "Location", "Initial fuel level", "Final fuel level", "Fuel Drained"],
               filteredDrains.map((row, idx) => [
                 idx + 1,
                 row.vehicle || row.grouping,
-                getValue(row, ["Driver"]) || row.driver || "—",
-                getValue(row, ["Initial location"]) || "—",
+                getDriverAlias(getValue(row, ["Driver"]) || row.driver || ""),
                 getValue(row, ["Drain time"]) || "—",
-                getValue(row, ["Final location"]) || "—",
-                getValue(row, ["Drained"]) || "—",
+                getValue(row, ["Initial location"]) || "—",
+                getValue(row, ["Initial fuel level"]) || "—",
                 getValue(row, ["Final fuel level"]) || "—",
+                getValue(row, ["Drained"]) || "—",
               ]),
               "Fuel Drains",
             )

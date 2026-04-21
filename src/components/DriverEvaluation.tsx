@@ -15,6 +15,7 @@ import { BusFront } from "lucide-react";
 import PageHeader from "./PageHeader";
 import DateFilter from "./DateFilter";
 import { VIOLATION_TYPES, type SharedTabProps, type ViolationType } from "../lib/data";
+import { aliasDriverName, buildDriverAliasMap } from "../lib/driverAlias";
 
 function durationToSeconds(value?: string) {
   if (!value) return 0;
@@ -32,10 +33,13 @@ function durationToSeconds(value?: string) {
 
 function secondsToDuration(seconds: number) {
   const safe = Math.max(0, Math.floor(seconds));
-  const hh = String(Math.floor(safe / 3600)).padStart(2, "0");
-  const mm = String(Math.floor((safe % 3600) / 60)).padStart(2, "0");
-  const ss = String(safe % 60).padStart(2, "0");
-  return `${hh}:${mm}:${ss}`;
+  const days = Math.floor(safe / 86400);
+  const dayRemainder = safe % 86400;
+  const hh = String(Math.floor(dayRemainder / 3600)).padStart(2, "0");
+  const mm = String(Math.floor((dayRemainder % 3600) / 60)).padStart(2, "0");
+  const ss = String(dayRemainder % 60).padStart(2, "0");
+  const timePart = `${hh}:${mm}:${ss}`;
+  return days > 0 ? `${days} day${days === 1 ? "" : "s"} ${timePart}` : timePart;
 }
 
 export default function DriverEvaluation({
@@ -56,9 +60,18 @@ export default function DriverEvaluation({
   const selectedDriver = selectedDriverId === "ALL"
     ? null
     : drivers.find((d) => d.id === selectedDriverId) ?? null;
+  const driverAliasMap = useMemo(
+    () => buildDriverAliasMap([...drivers.map((d) => d.name), ...filteredViolations.map((v) => v.driver)]),
+    [drivers, filteredViolations],
+  );
   const selectedDriverMetrics = useMemo(() => {
     const selectedDrivers = selectedDriver ? [selectedDriver] : drivers;
-    if (selectedDriver) return selectedDriver;
+    if (selectedDriver) {
+      return {
+        ...selectedDriver,
+        name: aliasDriverName(selectedDriver.name, driverAliasMap),
+      };
+    }
     const totalDistance = selectedDrivers.reduce((sum, d) => sum + (d.distance ?? 0), 0);
     const totalFuelConsumed = selectedDrivers.reduce((sum, d) => sum + (d.fuelConsumed ?? 0), 0);
     const totalFuelFilled = selectedDrivers.reduce((sum, d) => sum + (d.fuelFilled ?? 0), 0);
@@ -71,6 +84,9 @@ export default function DriverEvaluation({
     const maxSpeed = selectedDrivers.reduce((max, d) => Math.max(max, d.maxSpeed ?? 0), 0);
     const engineSeconds = selectedDrivers.reduce((sum, d) => sum + durationToSeconds(d.engineRunningTime), 0);
     const idlingSeconds = selectedDrivers.reduce((sum, d) => sum + durationToSeconds(d.idlingEngineTime), 0);
+    const avgConsumption = selectedDrivers.length
+      ? selectedDrivers.reduce((sum, d) => sum + (d.avgConsumption ?? 0), 0) / selectedDrivers.length
+      : 0;
     return {
       id: "ALL",
       name: "All Drivers",
@@ -83,13 +99,13 @@ export default function DriverEvaluation({
       totalDrains,
       avgSpeed: Number(avgSpeed.toFixed(0)),
       maxSpeed,
-      avgConsumption: totalFuelConsumed > 0 ? totalDistance / totalFuelConsumed : 0,
+      avgConsumption,
       engineRunningTime: secondsToDuration(engineSeconds),
       idlingEngineTime: secondsToDuration(idlingSeconds),
       propulsion: "Diesel",
       transportWorkAvg: 0,
     };
-  }, [selectedDriver, drivers]);
+  }, [selectedDriver, drivers, driverAliasMap]);
 
   const driverViolations = selectedDriver
     ? filteredViolations.filter((v) => v.driver === selectedDriver.name)
@@ -147,7 +163,7 @@ export default function DriverEvaluation({
                 <option value="ALL">All</option>
                 {drivers.map((d) => (
                   <option key={d.id} value={d.id}>
-                    {d.name}
+                    {aliasDriverName(d.name, driverAliasMap)}
                   </option>
                 ))}
               </select>
