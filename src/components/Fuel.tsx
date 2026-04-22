@@ -34,6 +34,22 @@ function parseNumeric(value: string) {
   return match ? Number(match[0]) : 0;
 }
 
+function parseWialonDateTime(value: string) {
+  const raw = String(value ?? "").trim();
+  if (!raw || raw === "-----" || raw === "—") return Number.NEGATIVE_INFINITY;
+  const match = raw.match(/^(\d{2})\.(\d{2})\.(\d{4})(?:\s+(\d{2}):(\d{2})(?::(\d{2}))?)?/);
+  if (!match) return Number.NEGATIVE_INFINITY;
+  const dd = Number(match[1]);
+  const mm = Number(match[2]);
+  const yyyy = Number(match[3]);
+  const hh = Number(match[4] ?? 0);
+  const min = Number(match[5] ?? 0);
+  const ss = Number(match[6] ?? 0);
+  const dt = new Date(yyyy, mm - 1, dd, hh, min, ss);
+  const ms = dt.getTime();
+  return Number.isFinite(ms) ? ms : Number.NEGATIVE_INFINITY;
+}
+
 function downloadTableXlsx(baseName: string, headers: string[], rows: Array<Array<string | number>>, sheetName: string) {
   const jsonRows = rows.map((row) =>
     headers.reduce<Record<string, string | number>>((acc, header, idx) => {
@@ -414,15 +430,42 @@ export default function Fuel({ data, loading, error, startDate, endDate, onStart
       || (drainTime && drainTime !== "-----");
   };
 
+  const hasMeaningfulFillingValues = (row: FuelRecord) => {
+    const filled = getValue(row, ["Filled"]);
+    const fillingTime = getValue(row, ["Filling or charge time"]);
+    const location = getValue(row, ["Location"]) || row.location;
+    const initialFuel = getValue(row, ["Initial fuel level"]);
+    const finalFuel = getValue(row, ["Final fuel level"]);
+    return parseNumeric(filled) > 0
+      || (fillingTime && fillingTime !== "-----")
+      || (location && location !== "-----")
+      || (initialFuel && initialFuel !== "-----")
+      || (finalFuel && finalFuel !== "-----");
+  };
+
   const filteredFillings = useMemo(
-    () => fuelFillings.filter((r) => selectedVehicle === "ALL" || r.vehicle === selectedVehicle),
+    () => fuelFillings
+      .filter((r) => selectedVehicle === "ALL" || r.vehicle === selectedVehicle)
+      .filter(hasMeaningfulFillingValues)
+      .slice()
+      .sort((a, b) => {
+        const aTs = parseWialonDateTime(getValue(a, ["Filling or charge time"]));
+        const bTs = parseWialonDateTime(getValue(b, ["Filling or charge time"]));
+        return bTs - aTs;
+      }),
     [fuelFillings, selectedVehicle],
   );
 
   const filteredDrains = useMemo(
     () => fuelDrains
       .filter((r) => selectedVehicle === "ALL" || r.vehicle === selectedVehicle)
-      .filter(hasMeaningfulDrainValues),
+      .filter(hasMeaningfulDrainValues)
+      .slice()
+      .sort((a, b) => {
+        const aTs = parseWialonDateTime(getValue(a, ["Drain time"]));
+        const bTs = parseWialonDateTime(getValue(b, ["Drain time"]));
+        return bTs - aTs;
+      }),
     [fuelDrains, selectedVehicle],
   );
 

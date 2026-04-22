@@ -131,8 +131,8 @@ export interface SharedTabProps {
 }
 
 export const DRIVER_MAP: Record<string, string> = {
-  "KDE 181Q": "Mike Muthoka",
-  "KDE 182Q": "Alvin Kamau",
+  "KDE 181Q": "Driver A",
+  "KDE 182Q": "Driver B",
 };
 
 export const VIOLATION_TYPES = [

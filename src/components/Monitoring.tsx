@@ -133,8 +133,16 @@ export default function Monitoring({
     driverFilter === "All"
       ? dateFiltered
       : dateFiltered.filter((r) => r.driver === driverFilter);
+
+  const ordered = useMemo(
+    () =>
+      filtered
+        .slice()
+        .sort((a, b) => toDate(b.beginning).getTime() - toDate(a.beginning).getTime()),
+    [filtered],
+  );
   const totalPages = Math.max(1, Math.ceil(filtered.length / MONITORING_PAGE_SIZE));
-  const pagedRows = filtered.slice(
+  const pagedRows = ordered.slice(
     (currentPage - 1) * MONITORING_PAGE_SIZE,
     currentPage * MONITORING_PAGE_SIZE,
   );
@@ -215,7 +223,7 @@ export default function Monitoring({
         </div>
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <button
-            onClick={() => exportMonitoringCSV(filtered, getAlias)}
+            onClick={() => exportMonitoringCSV(ordered, getAlias)}
             style={{
               padding: "6px 10px",
               borderRadius: "var(--radius-sm)",

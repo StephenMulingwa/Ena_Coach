@@ -26,5 +26,7 @@ export function buildDriverAliasMap(names: string[]) {
 export function aliasDriverName(name: string, aliasMap: Map<string, string>) {
   const normalized = String(name ?? "").trim();
   if (!normalized) return "—";
+  // Preserve explicit, client-facing aliases (e.g. "Driver A") without re-aliasing.
+  if (/^Driver\s+[A-Z]$/.test(normalized)) return normalized;
   return aliasMap.get(normalized) ?? "Driver";
 }

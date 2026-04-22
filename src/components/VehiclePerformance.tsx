@@ -56,7 +56,8 @@ export default function VehiclePerformancePage({
         totalFilledL: d.fuelFilled,
         totalDrainedL: d.fuelDrained,
         avgSpeedKmH: d.avgSpeed,
-        engineHours: d.engineRunningTime,
+        engineTime: d.engineRunningTime,
+        idlingTime: d.idlingEngineTime ?? "00:00:00",
       });
       const perf = perfByVehicle.get(d.vehicle);
       for (const dd of perf?.drivers ?? []) {
@@ -74,7 +75,8 @@ export default function VehiclePerformancePage({
           totalFilledL: summaryDriver.fuelFilled,
           totalDrainedL: summaryDriver.fuelDrained,
           avgSpeedKmH: summaryDriver.avgSpeed,
-          engineHours: summaryDriver.engineRunningTime,
+          engineTime: summaryDriver.engineRunningTime,
+          idlingTime: summaryDriver.idlingEngineTime ?? "00:00:00",
         });
       }
     }
@@ -92,7 +94,8 @@ export default function VehiclePerformancePage({
       "Total Filled": row.totalFilledL,
       "Total Drained": row.totalDrainedL,
       "Avg Speed": row.avgSpeedKmH,
-      "Engine Hours": row.engineHours,
+      "Engine Time": row.engineTime,
+      "Idling Time": row.idlingTime,
     }));
     const sheet = XLSX.utils.json_to_sheet(rows);
     const book = XLSX.utils.book_new();
@@ -144,7 +147,8 @@ export default function VehiclePerformancePage({
                 <th style={{ ...thStyle, textAlign: "right" }}>Total Filled</th>
                 <th style={{ ...thStyle, textAlign: "right" }}>Total Drained</th>
                 <th style={{ ...thStyle, textAlign: "right" }}>Avg Speed</th>
-                <th style={{ ...thStyle, textAlign: "right" }}>Engine Hours</th>
+                <th style={{ ...thStyle, textAlign: "right" }}>Engine Time</th>
+                <th style={{ ...thStyle, textAlign: "right" }}>Idling Time</th>
               </tr>
             </thead>
             <tbody>
@@ -188,6 +192,7 @@ export default function VehiclePerformancePage({
                       <td style={{ padding: "10px 14px", textAlign: "right" }}>{d.fuelDrained.toLocaleString()}</td>
                       <td style={{ padding: "10px 14px", textAlign: "right" }}>{d.avgSpeed}</td>
                       <td style={{ padding: "10px 14px", textAlign: "right" }}>{d.engineRunningTime}</td>
+                      <td style={{ padding: "10px 14px", textAlign: "right" }}>{d.idlingEngineTime ?? "00:00:00"}</td>
                     </tr>
 
                     {isExpanded && (
@@ -216,12 +221,13 @@ export default function VehiclePerformancePage({
                             <td style={{ padding: "8px 14px", textAlign: "right" }}>{summaryDriver.fuelDrained.toLocaleString()}</td>
                             <td style={{ padding: "8px 14px", textAlign: "right" }}>{summaryDriver.avgSpeed}</td>
                             <td style={{ padding: "8px 14px", textAlign: "right" }}>{summaryDriver.engineRunningTime}</td>
+                            <td style={{ padding: "8px 14px", textAlign: "right" }}>{summaryDriver.idlingEngineTime ?? "00:00:00"}</td>
                           </tr>
                         )})
                       ) : (
                         <tr style={{ borderBottom: "1px solid #dbe7ff", background: "#f4f8ff" }}>
                           <td style={{ padding: "10px 12px" }} />
-                          <td colSpan={9} style={{ padding: "12px 14px", color: "var(--text3)" }}>
+                          <td colSpan={10} style={{ padding: "12px 14px", color: "var(--text3)" }}>
                             No driver breakdown available for this vehicle.
                           </td>
                         </tr>

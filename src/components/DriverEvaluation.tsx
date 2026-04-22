@@ -17,6 +17,22 @@ import DateFilter from "./DateFilter";
 import { VIOLATION_TYPES, type SharedTabProps, type ViolationType } from "../lib/data";
 import { aliasDriverName, buildDriverAliasMap } from "../lib/driverAlias";
 
+function parseWialonDateTime(value: string) {
+  const raw = String(value ?? "").trim();
+  if (!raw || raw === "-----" || raw === "—") return Number.NEGATIVE_INFINITY;
+  const match = raw.match(/^(\d{2})\.(\d{2})\.(\d{4})(?:\s+(\d{2}):(\d{2})(?::(\d{2}))?)?/);
+  if (!match) return Number.NEGATIVE_INFINITY;
+  const dd = Number(match[1]);
+  const mm = Number(match[2]);
+  const yyyy = Number(match[3]);
+  const hh = Number(match[4] ?? 0);
+  const min = Number(match[5] ?? 0);
+  const ss = Number(match[6] ?? 0);
+  const dt = new Date(yyyy, mm - 1, dd, hh, min, ss);
+  const ms = dt.getTime();
+  return Number.isFinite(ms) ? ms : Number.NEGATIVE_INFINITY;
+}
+
 function durationToSeconds(value?: string) {
   if (!value) return 0;
   const normalized = String(value).trim();
@@ -118,9 +134,20 @@ export default function DriverEvaluation({
   const tableRows = selectedViolation === "All"
     ? driverViolations
     : driverViolations.filter((row) => row.violation === selectedViolation);
+  const orderedRows = useMemo(
+    () =>
+      tableRows
+        .slice()
+        .sort((a, b) => {
+          const aTs = parseWialonDateTime(a.beginning);
+          const bTs = parseWialonDateTime(b.beginning);
+          return bTs - aTs;
+        }),
+    [tableRows],
+  );
   const pageSize = 10;
   const totalPages = Math.max(1, Math.ceil(tableRows.length / pageSize));
-  const pagedRows = tableRows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const pagedRows = orderedRows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   const card: React.CSSProperties = {
     background: "var(--surface)",
