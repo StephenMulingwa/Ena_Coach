@@ -14,6 +14,17 @@ import { aliasDriverName, buildDriverAliasMap } from "../lib/driverAlias";
 
 const MONITORING_PAGE_SIZE = 10;
 
+function makeTimestamp() {
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, "0");
+  const dd = String(now.getDate()).padStart(2, "0");
+  const hh = String(now.getHours()).padStart(2, "0");
+  const min = String(now.getMinutes()).padStart(2, "0");
+  const ss = String(now.getSeconds()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}_${hh}-${min}-${ss}`;
+}
+
 function escapeExcelString(value: string) {
   return String(value ?? "").replaceAll('"', '""');
 }
@@ -71,7 +82,7 @@ function exportMonitoringCSV(rows: ViolationRecord[], getAlias: (name: string) =
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = "monitoring_report.csv";
+  a.download = `violations_filtered_${makeTimestamp()}.csv`;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -152,7 +163,7 @@ function exportAllViolationsWorkbook(
     XLSX.utils.book_append_sheet(workbook, worksheet, violationType.slice(0, 31));
   }
 
-  XLSX.writeFile(workbook, "monitoring_all_violations.xlsx");
+  XLSX.writeFile(workbook, `violations_all_sheets_${makeTimestamp()}.xlsx`);
 }
 
 export default function Monitoring({
