@@ -7,6 +7,58 @@ import type { FuelRecord, SharedTabProps } from "../lib/data";
 import * as XLSX from "xlsx";
 import { aliasDriverName, buildDriverAliasMap } from "../lib/driverAlias";
 
+function escapeExcelString(value: string) {
+  return String(value ?? "").replaceAll('"', '""');
+}
+
+function mapsHyperlinkFormula(label: string, query: string) {
+  const safeLabel = escapeExcelString(label);
+  const safeQuery = String(query ?? "").trim();
+  if (!safeQuery || safeQuery === "-----" || safeQuery === "—") return safeLabel;
+  const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(safeQuery)}`;
+  return `HYPERLINK("${escapeExcelString(url)}","${safeLabel}")`;
+}
+
+type ExportCell = string | number | { label: string; query: string };
+
+function buildSheetWithOptionalHyperlinks(
+  headers: string[],
+  rows: Array<Array<ExportCell>>,
+  hyperlinkColumnIndexes: number[],
+) {
+  const aoa: XLSX.CellObject[][] = [];
+  aoa.push(headers.map((h) => ({ t: "s", v: h })));
+
+  for (const row of rows) {
+    const out: XLSX.CellObject[] = [];
+    for (let i = 0; i < headers.length; i += 1) {
+      const cellVal = row[i] ?? "";
+      const display = typeof cellVal === "object" && cellVal !== null && "label" in cellVal
+        ? String(cellVal.label ?? "")
+        : String(cellVal ?? "");
+      if (hyperlinkColumnIndexes.includes(i)) {
+        const query = typeof cellVal === "object" && cellVal !== null && "query" in cellVal
+          ? String(cellVal.query ?? "")
+          : display;
+        const safeQuery = String(query ?? "").trim();
+        if (!safeQuery || safeQuery === "-----" || safeQuery === "—") {
+          out.push({ t: "s", v: display });
+        } else {
+          const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(safeQuery)}`;
+          out.push({ t: "s", v: display, l: { Target: url } });
+        }
+      } else if (typeof cellVal === "number") {
+        out.push({ t: "n", v: cellVal });
+      } else {
+        out.push({ t: "s", v: display });
+      }
+    }
+    aoa.push(out);
+  }
+
+  return XLSX.utils.aoa_to_sheet(aoa);
+}
+
 function getValue(record: FuelRecord, keys: string[]) {
   const entries = Object.entries(record.columns ?? {});
   for (const key of keys) {
@@ -50,42 +102,32 @@ function parseWialonDateTime(value: string) {
   return Number.isFinite(ms) ? ms : Number.NEGATIVE_INFINITY;
 }
 
-function downloadTableXlsx(baseName: string, headers: string[], rows: Array<Array<string | number>>, sheetName: string) {
-  const jsonRows = rows.map((row) =>
-    headers.reduce<Record<string, string | number>>((acc, header, idx) => {
-      acc[header] = row[idx] ?? "";
-      return acc;
-    }, {}),
-  );
-  const sheet = XLSX.utils.json_to_sheet(jsonRows);
+function downloadTableXlsx(baseName: string, headers: string[], rows: Array<Array<ExportCell>>, sheetName: string) {
+  // Location column is index 3 for both fuel sheets (no "#" column).
+  const sheet = buildSheetWithOptionalHyperlinks(headers, rows, [3]);
   const book = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(book, sheet, sheetName);
   XLSX.writeFile(book, `${baseName}_${makeTimestamp()}.xlsx`);
 }
 
 function downloadFuelWorkbook(
-  fillingsRows: Array<Array<string | number>>,
-  drainRows: Array<Array<string | number>>,
+  fillingsRows: Array<Array<ExportCell>>,
+  drainRows: Array<Array<ExportCell>>,
 ) {
   const book = XLSX.utils.book_new();
-  const fillingsHeaders = ["#", "Vehicle", "Driver", "Filling date", "Location", "Initial fuel level", "Final fuel level", "Fuel Filled"];
-  const drainsHeaders = ["#", "Vehicle", "Driver", "Drain time", "Location", "Initial fuel level", "Final fuel level", "Fuel Drained"];
+  const fillingsHeaders = ["Vehicle", "Driver", "Filling date", "Location", "Initial fuel level", "Final fuel level", "Fuel Filled"];
+  const drainsHeaders = ["Vehicle", "Driver", "Drain time", "Location", "Initial fuel level", "Final fuel level", "Fuel Drained"];
 
-  const fillingsSheetRows = fillingsRows.map((row) =>
-    fillingsHeaders.reduce<Record<string, string | number>>((acc, header, idx) => {
-      acc[header] = row[idx] ?? "";
-      return acc;
-    }, {}),
+  XLSX.utils.book_append_sheet(
+    book,
+    buildSheetWithOptionalHyperlinks(fillingsHeaders, fillingsRows, [3]),
+    "Fuel Fillings",
   );
-  const drainsSheetRows = drainRows.map((row) =>
-    drainsHeaders.reduce<Record<string, string | number>>((acc, header, idx) => {
-      acc[header] = row[idx] ?? "";
-      return acc;
-    }, {}),
+  XLSX.utils.book_append_sheet(
+    book,
+    buildSheetWithOptionalHyperlinks(drainsHeaders, drainRows, [3]),
+    "Fuel Drains",
   );
-
-  XLSX.utils.book_append_sheet(book, XLSX.utils.json_to_sheet(fillingsSheetRows), "Fuel Fillings");
-  XLSX.utils.book_append_sheet(book, XLSX.utils.json_to_sheet(drainsSheetRows), "Fuel Drains");
   XLSX.writeFile(book, `fuel_operations_${makeTimestamp()}.xlsx`);
 }
 
@@ -504,22 +546,23 @@ export default function Fuel({ data, loading, error, startDate, endDate, onStart
 
   const downloadAllFuelSheets = () =>
     downloadFuelWorkbook(
-      filteredFillings.map((row, idx) => [
-        idx + 1,
+      filteredFillings.map((row) => [
         row.vehicle || row.grouping,
         getDriverAlias(getValue(row, ["Driver"]) || row.driver || ""),
         getValue(row, ["Filling or charge time"]),
-        row.location || "—",
+        { label: row.location || "—", query: row.locationCoords || row.location || "" },
         getValue(row, ["Initial fuel level"]) || "—",
         getValue(row, ["Final fuel level"]) || "—",
         getValue(row, ["Filled"]) || "—",
       ]),
-      filteredDrains.map((row, idx) => [
-        idx + 1,
+      filteredDrains.map((row) => [
         row.vehicle || row.grouping,
         getDriverAlias(getValue(row, ["Driver"]) || row.driver || ""),
         getValue(row, ["Drain time"]) || "—",
-        getValue(row, ["Initial location"]) || "—",
+        {
+          label: getValue(row, ["Initial location"]) || "—",
+          query: row.locationCoords || getValue(row, ["Initial location"]) || row.location || "",
+        },
         getValue(row, ["Initial fuel level"]) || "—",
         getValue(row, ["Final fuel level"]) || "—",
         getValue(row, ["Drained"]) || "—",
@@ -608,13 +651,12 @@ export default function Fuel({ data, loading, error, startDate, endDate, onStart
           onDownloadXlsx={() =>
             downloadTableXlsx(
               "fuel_fillings",
-              ["#", "Vehicle", "Driver", "Filling date", "Location", "Initial fuel level", "Final fuel level", "Fuel Filled"],
-              filteredFillings.map((row, idx) => [
-                idx + 1,
+              ["Vehicle", "Driver", "Filling date", "Location", "Initial fuel level", "Final fuel level", "Fuel Filled"],
+              filteredFillings.map((row) => [
                 row.vehicle || row.grouping,
                 getDriverAlias(getValue(row, ["Driver"]) || row.driver || ""),
                 getValue(row, ["Filling or charge time"]),
-                row.location || "—",
+                { label: row.location || "—", query: row.locationCoords || row.location || "" },
                 getValue(row, ["Initial fuel level"]) || "—",
                 getValue(row, ["Final fuel level"]) || "—",
                 getValue(row, ["Filled"]) || "—",
@@ -639,13 +681,15 @@ export default function Fuel({ data, loading, error, startDate, endDate, onStart
           onDownloadXlsx={() =>
             downloadTableXlsx(
               "fuel_drains",
-              ["#", "Vehicle", "Driver", "Drain time", "Location", "Initial fuel level", "Final fuel level", "Fuel Drained"],
-              filteredDrains.map((row, idx) => [
-                idx + 1,
+              ["Vehicle", "Driver", "Drain time", "Location", "Initial fuel level", "Final fuel level", "Fuel Drained"],
+              filteredDrains.map((row) => [
                 row.vehicle || row.grouping,
                 getDriverAlias(getValue(row, ["Driver"]) || row.driver || ""),
                 getValue(row, ["Drain time"]) || "—",
-                getValue(row, ["Initial location"]) || "—",
+                {
+                  label: getValue(row, ["Initial location"]) || "—",
+                  query: row.locationCoords || getValue(row, ["Initial location"]) || row.location || "",
+                },
                 getValue(row, ["Initial fuel level"]) || "—",
                 getValue(row, ["Final fuel level"]) || "—",
                 getValue(row, ["Drained"]) || "—",

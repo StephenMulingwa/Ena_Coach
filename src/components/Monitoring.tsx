@@ -14,6 +14,18 @@ import { aliasDriverName, buildDriverAliasMap } from "../lib/driverAlias";
 
 const MONITORING_PAGE_SIZE = 10;
 
+function escapeExcelString(value: string) {
+  return String(value ?? "").replaceAll('"', '""');
+}
+
+function mapsHyperlinkFormula(label: string, query: string) {
+  const safeLabel = escapeExcelString(label);
+  const safeQuery = String(query ?? "").trim();
+  if (!safeQuery || safeQuery === "-----" || safeQuery === "—") return safeLabel;
+  const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(safeQuery)}`;
+  return `HYPERLINK("${escapeExcelString(url)}","${safeLabel}")`;
+}
+
 function toDate(value: string) {
   const [datePart] = value.split(" ");
   const [dd, mm, yyyy] = datePart.split(".").map(Number);
@@ -96,7 +108,47 @@ function exportAllViolationsWorkbook(
       const d = toDate(r.beginning);
       return d >= s && d <= e && r.violation === violationType;
     });
-    const worksheet = XLSX.utils.json_to_sheet(toSheetRows(rows, getAlias));
+    const headers = [
+      "Driver",
+      "Vehicle",
+      "Violation",
+      "Beginning",
+      "Initial location",
+      "End",
+      "Final location",
+      "Avg. speed",
+      "Max. speed",
+      "Duration",
+      "Mileage",
+    ];
+    const aoa: XLSX.CellObject[][] = [];
+    aoa.push(headers.map((h) => ({ t: "s", v: h })));
+    for (const r of rows) {
+      const initialLabel = String(r.initialLocation ?? "");
+      const finalLabel = String(r.finalLocation ?? "");
+      const initialQuery = String(r.initialLocationCoords || r.initialLocation || "");
+      const finalQuery = String(r.finalLocationCoords || r.finalLocation || "");
+      const initialUrl = initialQuery.trim()
+        ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(initialQuery)}`
+        : "";
+      const finalUrl = finalQuery.trim()
+        ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(finalQuery)}`
+        : "";
+      aoa.push([
+        { t: "s", v: String(getAlias(r.driver) ?? "") },
+        { t: "s", v: String(r.vehicle ?? "") },
+        { t: "s", v: String(r.violation ?? "") },
+        { t: "s", v: String(r.beginning ?? "") },
+        initialUrl ? { t: "s", v: initialLabel, l: { Target: initialUrl } } : { t: "s", v: initialLabel },
+        { t: "s", v: String(r.end ?? "") },
+        finalUrl ? { t: "s", v: finalLabel, l: { Target: finalUrl } } : { t: "s", v: finalLabel },
+        { t: "s", v: String(r.avgSpeed ?? "") },
+        { t: "s", v: String(r.maxSpeed ?? "") },
+        { t: "s", v: String(r.duration ?? "") },
+        { t: "s", v: String(r.mileage ?? "") },
+      ]);
+    }
+    const worksheet = XLSX.utils.aoa_to_sheet(aoa);
     XLSX.utils.book_append_sheet(workbook, worksheet, violationType.slice(0, 31));
   }
 
