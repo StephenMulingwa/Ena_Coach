@@ -62,6 +62,40 @@ function cellCoords(cell: RawCell | undefined) {
   return "";
 }
 
+function shiftWialonDateTime(value: string, hoursToAdd = 3) {
+  const raw = String(value ?? "").trim();
+  if (!raw || raw === "-----") return raw;
+  const match = raw.match(/^(\d{2})\.(\d{2})\.(\d{4})(?:\s+(\d{2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (!match) return raw;
+  const dd = Number(match[1]);
+  const mm = Number(match[2]);
+  const yyyy = Number(match[3]);
+  const hh = Number(match[4] ?? 0);
+  const min = Number(match[5] ?? 0);
+  const ss = Number(match[6] ?? 0);
+  const dt = new Date(yyyy, mm - 1, dd, hh, min, ss);
+  if (Number.isNaN(dt.getTime())) return raw;
+  dt.setHours(dt.getHours() + hoursToAdd);
+  const outDd = String(dt.getDate()).padStart(2, "0");
+  const outMm = String(dt.getMonth() + 1).padStart(2, "0");
+  const outYy = dt.getFullYear();
+  const outHh = String(dt.getHours()).padStart(2, "0");
+  const outMin = String(dt.getMinutes()).padStart(2, "0");
+  const outSs = String(dt.getSeconds()).padStart(2, "0");
+  return `${outDd}.${outMm}.${outYy} ${outHh}:${outMin}:${outSs}`;
+}
+
+function maybeShiftByHeader(header: string, value: string) {
+  const h = String(header ?? "").toLowerCase();
+  const v = String(value ?? "").trim();
+  // Only shift real timestamps (dd.mm.yyyy hh:mm[:ss]) and avoid durations like "5 days 01:02:03".
+  if (/\bdays?\b/i.test(v)) return value;
+  if (h.includes("time") || h.includes("date")) {
+    return shiftWialonDateTime(value, 3);
+  }
+  return value;
+}
+
 async function fetchTableRows(tableIndex: number, rowCount: number, sid: string) {
   const rows = await callWialon<unknown>(
     "report/get_result_rows",
@@ -107,7 +141,7 @@ function rowsToFuelRecords(
     for (let i = 0; i < tableHeaders.length; i += 1) {
       const key = String(tableHeaders[i] ?? "").trim();
       if (!key) continue;
-      columns[key] = cellText(cells[i]);
+      columns[key] = maybeShiftByHeader(key, cellText(cells[i]));
     }
     return {
       id: baseId + index + 1,
@@ -263,10 +297,10 @@ export async function GET(request: Request) {
           driver,
           vehicle,
           violation,
-          beginning: cellText(cells[3]),
+          beginning: shiftWialonDateTime(cellText(cells[3]), 3),
           initialLocation: cellText(cells[4]),
           initialLocationCoords: cellCoords(cells[4]),
-          end: cellText(cells[5]),
+          end: shiftWialonDateTime(cellText(cells[5]), 3),
           finalLocation: cellText(cells[6]),
           finalLocationCoords: cellCoords(cells[6]),
           avgSpeed: cellText(cells[7]),
@@ -355,8 +389,8 @@ export async function GET(request: Request) {
       const cells = row.c ?? [];
       const grouping = cellText(cells[0]);
       const { driver, vehicle } = splitGrouping(grouping);
-      const lastMessageTime = cellText(cells[1]);
-      const lastCoordinatesTime = cellText(cells[2]);
+      const lastMessageTime = shiftWialonDateTime(cellText(cells[1]), 3);
+      const lastCoordinatesTime = shiftWialonDateTime(cellText(cells[2]), 3);
       const location = cellText(cells[3]);
       const locationCoords = cellCoords(cells[3]);
       const dfDriver = cellText(cells[4]) || driver;
