@@ -8,14 +8,15 @@ interface PageHeaderProps {
 export default function PageHeader({ title, titleAccent, subtitle, right }: PageHeaderProps) {
   return (
     <div
+      className="page-header-root"
       style={{
         display: "flex",
         alignItems: "flex-start",
         justifyContent: "space-between",
-        marginBottom: "28px",
+        flexWrap: "wrap",
       }}
     >
-      <div>
+      <div className="page-header-title" style={{ minWidth: 0, flexGrow: 1, flexShrink: 1, flexBasis: "auto" }}>
         <h2
           style={{
             fontFamily: "var(--font-head)",
@@ -41,7 +42,14 @@ export default function PageHeader({ title, titleAccent, subtitle, right }: Page
           </p>
         )}
       </div>
-      {right && <div>{right}</div>}
+      {right && (
+        <div
+          className="page-header-right"
+          style={{ flexGrow: 1, flexShrink: 1, flexBasis: "auto", display: "flex", justifyContent: "flex-end", minWidth: 0 }}
+        >
+          {right}
+        </div>
+      )}
     </div>
   );
 }

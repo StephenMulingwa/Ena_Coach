@@ -1,22 +1,28 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import PageHeader from "./PageHeader";
 import DateFilter from "./DateFilter";
 import type { FuelRecord, SharedTabProps } from "../lib/data";
 import * as XLSX from "xlsx";
-import { aliasDriverName, buildDriverAliasMap } from "../lib/driverAlias";
+import {
+  buildVehicleMissingOrdinalMap,
+  formatDriverDisplay,
+  isMissingDriver,
+  missingDriverFilterValue,
+  parseMissingDriverFilterValue,
+} from "../lib/driverDisplay";
 
-function escapeExcelString(value: string) {
-  return String(value ?? "").replaceAll('"', '""');
+const FUEL_DRIVER_SEP = "\x1f";
+
+function fuelDriverKey(vehicle: string, rawDriver: string) {
+  return `${String(vehicle ?? "").trim()}${FUEL_DRIVER_SEP}${String(rawDriver ?? "").trim()}`;
 }
 
-function mapsHyperlinkFormula(label: string, query: string) {
-  const safeLabel = escapeExcelString(label);
-  const safeQuery = String(query ?? "").trim();
-  if (!safeQuery || safeQuery === "-----" || safeQuery === "—") return safeLabel;
-  const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(safeQuery)}`;
-  return `HYPERLINK("${escapeExcelString(url)}","${safeLabel}")`;
+function parseFuelDriverKey(key: string): { vehicle: string; raw: string } | null {
+  const i = key.indexOf(FUEL_DRIVER_SEP);
+  if (i < 0) return null;
+  return { vehicle: key.slice(0, i), raw: key.slice(i + FUEL_DRIVER_SEP.length) };
 }
 
 type ExportCell = string | number | { label: string; query: string };
@@ -138,7 +144,7 @@ function FuelFillingsTable({
   allRows,
   totalFilled,
   onDownloadXlsx,
-  getDriverAlias,
+  formatDriverCell,
   onPrev,
   onNext,
 }: {
@@ -148,7 +154,7 @@ function FuelFillingsTable({
   allRows: FuelRecord[];
   totalFilled: number;
   onDownloadXlsx: () => void;
-  getDriverAlias: (name: string) => string;
+  formatDriverCell: (vehicle: string, rawDriver: string) => string;
   onPrev: () => void;
   onNext: () => void;
 }) {
@@ -171,7 +177,7 @@ function FuelFillingsTable({
       <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)", fontWeight: 700, color: "var(--text)" }}>
         Fuel Fillings <span style={{ color: "#15803d", fontWeight: 800 }}>({allRows.length} fills | {totalFilled.toFixed(2)} L total)</span>
       </div>
-      <div style={{ overflowX: "auto" }}>
+      <div className="data-table-scroll" style={{ overflowX: "auto", width: "100%", minWidth: 0 }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: ".8rem", minWidth: "1250px" }}>
           <thead>
             <tr style={{ background: "var(--surface2)", borderBottom: "1px solid var(--border2)" }}>
@@ -201,7 +207,9 @@ function FuelFillingsTable({
                 <tr key={row.id} style={{ borderBottom: "1px solid var(--border)" }}>
                   <td style={{ padding: "10px 12px" }}>{idx + 1}</td>
                   <td style={{ padding: "10px 12px", fontWeight: 700 }}>{row.vehicle || row.grouping}</td>
-                  <td style={{ padding: "10px 12px" }}>{getDriverAlias(getValue(row, ["Driver"]) || row.driver || "")}</td>
+                  <td style={{ padding: "10px 12px" }}>
+                    {formatDriverCell(row.vehicle || row.grouping || "", getValue(row, ["Driver"]) || row.driver || "")}
+                  </td>
                   <td style={{ padding: "10px 12px", fontFamily: "var(--font-mono)", fontSize: ".72rem" }}>
                     {getValue(row, ["Filling or charge time"])}
                   </td>
@@ -298,7 +306,7 @@ function FuelDrainsTable({
   allRows,
   totalDrained,
   onDownloadXlsx,
-  getDriverAlias,
+  formatDriverCell,
   onPrev,
   onNext,
 }: {
@@ -308,7 +316,7 @@ function FuelDrainsTable({
   allRows: FuelRecord[];
   totalDrained: number;
   onDownloadXlsx: () => void;
-  getDriverAlias: (name: string) => string;
+  formatDriverCell: (vehicle: string, rawDriver: string) => string;
   onPrev: () => void;
   onNext: () => void;
 }) {
@@ -331,7 +339,7 @@ function FuelDrainsTable({
       <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)", fontWeight: 700, color: "var(--text)" }}>
         Fuel Drains <span style={{ color: "var(--red)", fontWeight: 800 }}>({allRows.length} drains | {totalDrained.toFixed(2)} L total)</span>
       </div>
-      <div style={{ overflowX: "auto" }}>
+      <div className="data-table-scroll" style={{ overflowX: "auto", width: "100%", minWidth: 0 }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: ".8rem", minWidth: "1200px" }}>
           <thead>
             <tr style={{ background: "var(--surface2)", borderBottom: "1px solid var(--border2)" }}>
@@ -352,7 +360,9 @@ function FuelDrainsTable({
                 <tr key={row.id} style={{ borderBottom: "1px solid var(--border)" }}>
                   <td style={{ padding: "10px 12px" }}>{idx + 1}</td>
                   <td style={{ padding: "10px 12px", fontWeight: 700 }}>{row.vehicle || row.grouping}</td>
-                  <td style={{ padding: "10px 12px" }}>{getDriverAlias(getValue(row, ["Driver"]) || row.driver || "")}</td>
+                  <td style={{ padding: "10px 12px" }}>
+                    {formatDriverCell(row.vehicle || row.grouping || "", getValue(row, ["Driver"]) || row.driver || "")}
+                  </td>
                   <td style={{ padding: "10px 12px", fontFamily: "var(--font-mono)", fontSize: ".72rem" }}>{getValue(row, ["Drain time"]) || "—"}</td>
                   <td style={{ padding: "10px 12px" }}>
                     <a
@@ -443,23 +453,78 @@ function FuelDrainsTable({
 export default function Fuel({ data, loading, error, startDate, endDate, onStartChange, onEndChange, onRun }: SharedTabProps) {
   const fuelFillings = useMemo(() => data?.fuelFillings ?? [], [data?.fuelFillings]);
   const fuelDrains = useMemo(() => data?.fuelDrains ?? [], [data?.fuelDrains]);
+  const violations = useMemo(() => data?.violations ?? [], [data?.violations]);
+  const driversSummary = useMemo(() => data?.drivers ?? [], [data?.drivers]);
+  const extraMissingVehicles = useMemo(
+    () => driversSummary.filter((d) => isMissingDriver(d.name)).map((d) => d.vehicle),
+    [driversSummary],
+  );
+  const missingOrdinalByVehicle = useMemo(
+    () => buildVehicleMissingOrdinalMap(violations, fuelFillings, fuelDrains, extraMissingVehicles),
+    [violations, fuelFillings, fuelDrains, extraMissingVehicles],
+  );
+  const formatDriverCell = useCallback(
+    (vehicle: string, rawDriver: string) =>
+      formatDriverDisplay({
+        vehicle,
+        rawDriver,
+        missingOrdinalByVehicle,
+        violations,
+      }),
+    [missingOrdinalByVehicle, violations],
+  );
+
   const [selectedVehicle, setSelectedVehicle] = useState("ALL");
+  const [selectedDriver, setSelectedDriver] = useState("ALL");
   const [fillingsPage, setFillingsPage] = useState(0);
   const [drainsPage, setDrainsPage] = useState(0);
-  const driverAliasMap = useMemo(
-    () => buildDriverAliasMap([
-      ...fuelFillings.map((r) => getValue(r, ["Driver"]) || r.driver),
-      ...fuelDrains.map((r) => getValue(r, ["Driver"]) || r.driver),
-    ]),
-    [fuelFillings, fuelDrains],
-  );
-  const getDriverAlias = (name: string) => aliasDriverName(name, driverAliasMap);
 
   const vehicleOptions = useMemo(() => {
     const fromFillings = fuelFillings.map((r) => r.vehicle).filter(Boolean);
     const fromDrains = fuelDrains.map((r) => r.vehicle).filter(Boolean);
     return [...new Set([...fromFillings, ...fromDrains])].sort();
   }, [fuelFillings, fuelDrains]);
+
+  const driverSelectOptions = useMemo(() => {
+    const byValue = new Map<string, string>();
+    const consider = (r: FuelRecord) => {
+      const v = String(r.vehicle || r.grouping || "").trim();
+      if (!v) return;
+      if (selectedVehicle !== "ALL" && v !== selectedVehicle) return;
+      const raw = getValue(r, ["Driver"]) || r.driver || "";
+      const value = isMissingDriver(raw) ? missingDriverFilterValue(v) : fuelDriverKey(v, raw);
+      const driverLabel = formatDriverDisplay({
+        vehicle: v,
+        rawDriver: raw,
+        missingOrdinalByVehicle,
+        violations,
+      });
+      byValue.set(value, driverLabel);
+    };
+    fuelFillings.forEach(consider);
+    fuelDrains.forEach(consider);
+    return [...byValue.entries()]
+      .map(([value, label]) => ({ value, label }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [fuelFillings, fuelDrains, selectedVehicle, missingOrdinalByVehicle, violations]);
+
+  const rowMatchesDriverFilter = useCallback(
+    (r: FuelRecord) => {
+      if (selectedDriver === "ALL") return true;
+      const missVeh = parseMissingDriverFilterValue(selectedDriver);
+      if (missVeh) {
+        const v = String(r.vehicle || r.grouping || "").trim();
+        if (v !== missVeh) return false;
+        return isMissingDriver(getValue(r, ["Driver"]) || r.driver || "");
+      }
+      const parsed = parseFuelDriverKey(selectedDriver);
+      if (!parsed) return false;
+      const v = String(r.vehicle || r.grouping || "").trim();
+      const raw = getValue(r, ["Driver"]) || r.driver || "";
+      return v === parsed.vehicle && raw === parsed.raw;
+    },
+    [selectedDriver],
+  );
 
   const hasMeaningfulDrainValues = (row: FuelRecord) => {
     const drained = getValue(row, ["Drained"]);
@@ -488,6 +553,7 @@ export default function Fuel({ data, loading, error, startDate, endDate, onStart
   const filteredFillings = useMemo(
     () => fuelFillings
       .filter((r) => selectedVehicle === "ALL" || r.vehicle === selectedVehicle)
+      .filter(rowMatchesDriverFilter)
       .filter(hasMeaningfulFillingValues)
       .slice()
       .sort((a, b) => {
@@ -495,12 +561,13 @@ export default function Fuel({ data, loading, error, startDate, endDate, onStart
         const bTs = parseWialonDateTime(getValue(b, ["Filling or charge time"]));
         return bTs - aTs;
       }),
-    [fuelFillings, selectedVehicle],
+    [fuelFillings, selectedVehicle, rowMatchesDriverFilter],
   );
 
   const filteredDrains = useMemo(
     () => fuelDrains
       .filter((r) => selectedVehicle === "ALL" || r.vehicle === selectedVehicle)
+      .filter(rowMatchesDriverFilter)
       .filter(hasMeaningfulDrainValues)
       .slice()
       .sort((a, b) => {
@@ -508,7 +575,7 @@ export default function Fuel({ data, loading, error, startDate, endDate, onStart
         const bTs = parseWialonDateTime(getValue(b, ["Drain time"]));
         return bTs - aTs;
       }),
-    [fuelDrains, selectedVehicle],
+    [fuelDrains, selectedVehicle, rowMatchesDriverFilter],
   );
 
   const totalFilledLitres = useMemo(
@@ -548,7 +615,7 @@ export default function Fuel({ data, loading, error, startDate, endDate, onStart
     downloadFuelWorkbook(
       filteredFillings.map((row) => [
         row.vehicle || row.grouping,
-        getDriverAlias(getValue(row, ["Driver"]) || row.driver || ""),
+        formatDriverCell(row.vehicle || row.grouping || "", getValue(row, ["Driver"]) || row.driver || ""),
         getValue(row, ["Filling or charge time"]),
         { label: row.location || "—", query: row.locationCoords || row.location || "" },
         getValue(row, ["Initial fuel level"]) || "—",
@@ -557,7 +624,7 @@ export default function Fuel({ data, loading, error, startDate, endDate, onStart
       ]),
       filteredDrains.map((row) => [
         row.vehicle || row.grouping,
-        getDriverAlias(getValue(row, ["Driver"]) || row.driver || ""),
+        formatDriverCell(row.vehicle || row.grouping || "", getValue(row, ["Driver"]) || row.driver || ""),
         getValue(row, ["Drain time"]) || "—",
         {
           label: getValue(row, ["Initial location"]) || "—",
@@ -570,7 +637,7 @@ export default function Fuel({ data, loading, error, startDate, endDate, onStart
     );
 
   return (
-    <div>
+    <div style={{ width: "100%", maxWidth: "100%", minWidth: 0, overflowX: "auto", overflowY: "visible" }}>
       <PageHeader
         title="Fuel"
         titleAccent="Operations"
@@ -604,7 +671,12 @@ export default function Fuel({ data, loading, error, startDate, endDate, onStart
         <select
           id="fuel-vehicle-filter"
           value={selectedVehicle}
-          onChange={(e) => setSelectedVehicle(e.target.value)}
+          onChange={(e) => {
+            setSelectedVehicle(e.target.value);
+            setSelectedDriver("ALL");
+            setFillingsPage(0);
+            setDrainsPage(0);
+          }}
           style={{
             minWidth: 180,
             padding: "6px 10px",
@@ -623,6 +695,40 @@ export default function Fuel({ data, loading, error, startDate, endDate, onStart
             </option>
           ))}
         </select>
+
+        <label
+          htmlFor="fuel-driver-filter"
+          style={{ fontSize: ".78rem", fontWeight: 700, color: "var(--text)", marginLeft: 6 }}
+        >
+          Driver
+        </label>
+        <select
+          id="fuel-driver-filter"
+          value={selectedDriver}
+          onChange={(e) => {
+            setSelectedDriver(e.target.value);
+            setFillingsPage(0);
+            setDrainsPage(0);
+          }}
+          style={{
+            minWidth: 220,
+            padding: "6px 10px",
+            borderRadius: 8,
+            border: "1px solid var(--border2)",
+            background: "var(--surface)",
+            color: "var(--text)",
+            fontSize: ".78rem",
+            fontWeight: 600,
+          }}
+        >
+          <option value="ALL">All Drivers</option>
+          {driverSelectOptions.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+
         <button
           onClick={downloadAllFuelSheets}
           style={{
@@ -647,14 +753,14 @@ export default function Fuel({ data, loading, error, startDate, endDate, onStart
           totalRows={filteredFillings.length}
           allRows={filteredFillings}
           totalFilled={totalFilledLitres}
-          getDriverAlias={getDriverAlias}
+          formatDriverCell={formatDriverCell}
           onDownloadXlsx={() =>
             downloadTableXlsx(
               "fuel_fillings",
               ["Vehicle", "Driver", "Filling date", "Location", "Initial fuel level", "Final fuel level", "Fuel Filled"],
               filteredFillings.map((row) => [
                 row.vehicle || row.grouping,
-                getDriverAlias(getValue(row, ["Driver"]) || row.driver || ""),
+                formatDriverCell(row.vehicle || row.grouping || "", getValue(row, ["Driver"]) || row.driver || ""),
                 getValue(row, ["Filling or charge time"]),
                 { label: row.location || "—", query: row.locationCoords || row.location || "" },
                 getValue(row, ["Initial fuel level"]) || "—",
@@ -677,14 +783,14 @@ export default function Fuel({ data, loading, error, startDate, endDate, onStart
           totalRows={filteredDrains.length}
           allRows={filteredDrains}
           totalDrained={totalDrainedLitres}
-          getDriverAlias={getDriverAlias}
+          formatDriverCell={formatDriverCell}
           onDownloadXlsx={() =>
             downloadTableXlsx(
               "fuel_drains",
               ["Vehicle", "Driver", "Drain time", "Location", "Initial fuel level", "Final fuel level", "Fuel Drained"],
               filteredDrains.map((row) => [
                 row.vehicle || row.grouping,
-                getDriverAlias(getValue(row, ["Driver"]) || row.driver || ""),
+                formatDriverCell(row.vehicle || row.grouping || "", getValue(row, ["Driver"]) || row.driver || ""),
                 getValue(row, ["Drain time"]) || "—",
                 {
                   label: getValue(row, ["Initial location"]) || "—",

@@ -69,3 +69,230 @@ body::before {
   to { opacity: 1; transform: none; }
 }
 
+@keyframes fleet-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* —— Login hero animations (mirrors the legacy "simera-hero" ones) —— */
+@keyframes ena-hero-zoom {
+  0% { transform: scale(1) translate3d(0, 0, 0); }
+  50% { transform: scale(1.06) translate3d(-1.2%, -0.6%, 0); }
+  100% { transform: scale(1) translate3d(0, 0, 0); }
+}
+
+@keyframes ena-hero-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 0.95; }
+}
+
+@keyframes ena-hero-sheen {
+  0% { transform: translateX(-120%) skewX(-12deg); opacity: 0; }
+  20% { opacity: 0.9; }
+  60% { opacity: 0.9; }
+  100% { transform: translateX(260%) skewX(-12deg); opacity: 0; }
+}
+
+@keyframes ena-hero-float {
+  0%, 100% { transform: translateY(0); box-shadow: 0 14px 30px rgba(17, 40, 77, 0.10); }
+  50% { transform: translateY(-4px); box-shadow: 0 22px 40px rgba(17, 40, 77, 0.16); }
+}
+
+.ena-hero-img {
+  animation: ena-hero-zoom 22s ease-in-out infinite;
+  will-change: transform;
+}
+
+.ena-hero-overlay {
+  animation: ena-hero-pulse 9s ease-in-out infinite;
+  will-change: opacity;
+}
+
+.ena-hero-sheen {
+  animation: ena-hero-sheen 7s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+.ena-hero-float {
+  animation: ena-hero-float 5.5s ease-in-out infinite;
+  will-change: transform, box-shadow;
+}
+
+.ena-fade-up {
+  animation: fadeUp 0.55s cubic-bezier(.4, 0, .2, 1) both;
+}
+
+/* Login page: single-screen lock (matches Hass login.html rhythm) */
+.login-root {
+  min-height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
+}
+@media (max-width: 1023px) {
+  .login-root {
+    max-height: none;
+    min-height: 100dvh;
+    overflow-y: auto;
+  }
+}
+
+@keyframes card-rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.card-rise {
+  animation: card-rise 0.5s cubic-bezier(.2, .8, .2, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ena-hero-img,
+  .ena-hero-overlay,
+  .ena-hero-sheen,
+  .ena-hero-float,
+  .ena-fade-up,
+  .card-rise {
+    animation: none !important;
+  }
+}
+
+.page-header-root {
+  margin-bottom: 28px;
+  gap: 16px;
+}
+
+/* Wide Recharts / plot areas: horizontal scroll inside tab content */
+.tab-chart-scroll {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Dashboard bar chart: wrapped X labels may extend slightly below plot */
+.tab-chart-scroll--dashboard-chart {
+  overflow-y: visible;
+}
+
+/* Keep horizontal chart scroll from chaining to the page / main */
+.tab-chart-scroll--dashboard-isolate {
+  overscroll-behavior-x: contain;
+}
+
+/* Tables: horizontal scroll on desktop (mobile rules extend this in the media query below) */
+.data-table-scroll {
+  min-width: 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Dashboard: tables scroll vertically + horizontally inside the card */
+.dashboard-table-panel {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  max-height: min(52vh, 500px);
+  overflow-x: auto;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+}
+
+/* Table panels: horizontal scroll stays inside the card, not the dashboard page */
+.dashboard-table-panel--h-scroll {
+  overscroll-behavior-x: contain;
+  overscroll-behavior-y: auto;
+}
+
+/* Fleet Dashboard: no horizontal page scroll; inner panels handle overflow */
+.dashboard-root {
+  overflow-x: hidden;
+  max-width: 100%;
+}
+
+/* —— Responsive: tab pages (stack titles + date filter, scroll tables) —— */
+@media (max-width: 900px) {
+  .page-header-root {
+    flex-direction: column;
+    align-items: stretch;
+    margin-bottom: 10px;
+    gap: 8px;
+  }
+
+  .page-header-title {
+    flex-grow: 0;
+    flex-shrink: 1;
+    flex-basis: auto;
+  }
+
+  .page-header-right {
+    width: 100%;
+    max-width: 100%;
+    justify-content: flex-end !important;
+    flex-grow: 0 !important;
+    flex-shrink: 1 !important;
+    flex-basis: auto !important;
+  }
+
+  .date-filter-row {
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 5px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+  }
+
+  .date-filter-pair {
+    flex-grow: 1;
+    flex-shrink: 1;
+    flex-basis: 0;
+    min-width: 0;
+    max-width: none;
+  }
+
+  .date-filter-row .date-filter-label {
+    flex-grow: 0;
+    flex-shrink: 0;
+    flex-basis: auto;
+  }
+
+  .date-filter-pair input.date-filter-input[type="datetime-local"] {
+    min-width: 0;
+    flex-grow: 1;
+    flex-shrink: 1;
+    flex-basis: 0;
+    max-width: none;
+    font-size: 0.64rem !important;
+    padding: 2px 4px !important;
+    height: 32px;
+    min-height: 30px;
+    max-height: 32px;
+    line-height: 1.12;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+
+  .date-filter-row button {
+    width: auto;
+    flex-grow: 0;
+    flex-shrink: 0;
+    flex-basis: auto;
+    padding: 5px 10px !important;
+    font-size: 0.68rem !important;
+    white-space: nowrap;
+  }
+
+  .data-table-scroll {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    margin-left: 0;
+    border-radius: var(--radius-sm);
+  }
+}
+

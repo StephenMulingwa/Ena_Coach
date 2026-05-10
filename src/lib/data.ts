@@ -36,6 +36,20 @@ export interface ViolationRecord {
   count: number;
 }
 
+export interface SpeedRecord {
+  id: number;
+  grouping: string;
+  driver: string;
+  vehicle: string;
+  initialLocation: string;
+  initialLocationCoords: string;
+  finalLocation: string;
+  finalLocationCoords: string;
+  mileage: string;
+  avgSpeed: string;
+  duration: string;
+}
+
 export interface VehiclePerformance {
   vehicle: string;
   distanceKm: number;
@@ -92,6 +106,7 @@ export interface FinalReportRow {
 export interface WialonDataset {
   drivers: Driver[];
   violations: ViolationRecord[];
+  speed: SpeedRecord[];
   vehiclePerformance: VehiclePerformance[];
   finalReport: FinalReportRow[];
   vehicleLocations?: VehicleLocation[];
@@ -128,12 +143,9 @@ export interface SharedTabProps {
   onStartChange: (value: string) => void;
   onEndChange: (value: string) => void;
   onRun: () => void;
+  /** Dates the current `data` was loaded for (after Run). Picker may differ until Run. */
+  appliedDateRange?: { start: string; end: string };
 }
-
-export const DRIVER_MAP: Record<string, string> = {
-  "KDE 181Q": "Driver A",
-  "KDE 182Q": "Driver B",
-};
 
 export const VIOLATION_TYPES = [
   "Harsh Cornering",

@@ -1,18 +1,28 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import PageHeader from "./PageHeader";
 import DateFilter from "./DateFilter";
 import {
   VIOLATION_TYPES,
   type SharedTabProps,
-  type ViolationType,
 } from "../lib/data";
 import type { ViolationRecord } from "../lib/data";
 import * as XLSX from "xlsx";
-import { aliasDriverName, buildDriverAliasMap } from "../lib/driverAlias";
+import { buildVehicleMissingOrdinalMap, formatDriverDisplay, isMissingDriver, missingDriverFilterValue, parseMissingDriverFilterValue } from "../lib/driverDisplay";
 
 const MONITORING_PAGE_SIZE = 10;
+const MONITORING_DRIVER_SEP = "\x1f";
+
+function monitoringDriverKey(vehicle: string, rawDriver: string) {
+  return `${String(vehicle ?? "").trim()}${MONITORING_DRIVER_SEP}${String(rawDriver ?? "").trim()}`;
+}
+
+function parseMonitoringDriverKey(key: string): { vehicle: string; rawDriver: string } | null {
+  const i = key.indexOf(MONITORING_DRIVER_SEP);
+  if (i < 0) return null;
+  return { vehicle: key.slice(0, i), rawDriver: key.slice(i + MONITORING_DRIVER_SEP.length) };
+}
 
 function makeTimestamp() {
   const now = new Date();
@@ -25,25 +35,54 @@ function makeTimestamp() {
   return `${yyyy}-${mm}-${dd}_${hh}-${min}-${ss}`;
 }
 
-function escapeExcelString(value: string) {
-  return String(value ?? "").replaceAll('"', '""');
-}
-
-function mapsHyperlinkFormula(label: string, query: string) {
-  const safeLabel = escapeExcelString(label);
-  const safeQuery = String(query ?? "").trim();
-  if (!safeQuery || safeQuery === "-----" || safeQuery === "—") return safeLabel;
-  const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(safeQuery)}`;
-  return `HYPERLINK("${escapeExcelString(url)}","${safeLabel}")`;
-}
-
 function toDate(value: string) {
   const [datePart] = value.split(" ");
   const [dd, mm, yyyy] = datePart.split(".").map(Number);
   return new Date(yyyy, mm - 1, dd);
 }
 
-function exportMonitoringCSV(rows: ViolationRecord[], getAlias: (name: string) => string) {
+function clamp(n: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, n));
+}
+
+function gradeFor(score: number) {
+  if (score >= 90) return "A";
+  if (score >= 80) return "B";
+  if (score >= 70) return "C";
+  if (score >= 60) return "D";
+  return "E";
+}
+
+const VIOLATION_WEIGHTS: Record<string, number> = {
+  "Over Speeding": 2.0,
+  "Harsh Braking": 1.6,
+  "Harsh Cornering": 1.3,
+  "Over Revving": 1.1,
+  "Free Wheeling": 0.8,
+};
+
+function computeDriverScore(args: {
+  distanceKm: number;
+  counts: Record<string, number>;
+}) {
+  const distance = Math.max(0, args.distanceKm || 0);
+  const base = 100;
+  const denom = Math.max(1, distance);
+
+  // Penalty is based on violations per 100 km, weighted by severity.
+  // Tuned so that 1 "Over Speeding" per 100km costs ~16 points.
+  const per100 = (count: number) => (count / denom) * 100;
+  const penalty = VIOLATION_TYPES.reduce((sum, vt) => {
+    const c = args.counts[vt] ?? 0;
+    const w = VIOLATION_WEIGHTS[vt] ?? 1;
+    return sum + (per100(c) * w * 8);
+  }, 0);
+
+  const score = clamp(base - penalty, 0, 100);
+  return { score, grade: gradeFor(score), penalty };
+}
+
+function exportMonitoringCSV(rows: ViolationRecord[], formatDriverCell: (vehicle: string, rawDriver: string) => string) {
   const cols = [
     "Driver",
     "Vehicle",
@@ -61,7 +100,7 @@ function exportMonitoringCSV(rows: ViolationRecord[], getAlias: (name: string) =
   const body = rows
     .map((r) =>
       [
-        getAlias(r.driver),
+        formatDriverCell(r.vehicle, r.driver),
         r.vehicle,
         r.violation,
         r.beginning,
@@ -87,27 +126,11 @@ function exportMonitoringCSV(rows: ViolationRecord[], getAlias: (name: string) =
   URL.revokeObjectURL(url);
 }
 
-function toSheetRows(rows: ViolationRecord[], getAlias: (name: string) => string) {
-  return rows.map((r) => ({
-    Driver: getAlias(r.driver),
-    Vehicle: r.vehicle,
-    Violation: r.violation,
-    Beginning: r.beginning,
-    "Initial location": r.initialLocation,
-    End: r.end,
-    "Final location": r.finalLocation,
-    "Avg. speed": r.avgSpeed,
-    "Max. speed": r.maxSpeed,
-    Duration: r.duration,
-    Mileage: r.mileage,
-  }));
-}
-
 function exportAllViolationsWorkbook(
   start: string,
   end: string,
   violations: ViolationRecord[],
-  getAlias: (name: string) => string,
+  formatDriverCell: (vehicle: string, rawDriver: string) => string,
 ) {
   const workbook = XLSX.utils.book_new();
   const s = new Date(start);
@@ -146,7 +169,7 @@ function exportAllViolationsWorkbook(
         ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(finalQuery)}`
         : "";
       aoa.push([
-        { t: "s", v: String(getAlias(r.driver) ?? "") },
+        { t: "s", v: String(formatDriverCell(r.vehicle, r.driver) ?? "") },
         { t: "s", v: String(r.vehicle ?? "") },
         { t: "s", v: String(r.violation ?? "") },
         { t: "s", v: String(r.beginning ?? "") },
@@ -176,43 +199,132 @@ export default function Monitoring({
   onEndChange,
   onRun,
 }: SharedTabProps) {
-  const [activeViolation, setActiveViolation] = useState<ViolationType>("Harsh Cornering");
-  const [driverFilter, setDriverFilter] = useState("All");
+  const [driverFilter, setDriverFilter] = useState("ALL");
   const [currentPage, setCurrentPage] = useState(1);
-  const records = data?.violations ?? [];
-  const drivers = data?.drivers ?? [];
-  const driverAliasMap = useMemo(
-    () => buildDriverAliasMap([...drivers.map((d) => d.name), ...records.map((r) => r.driver)]),
-    [drivers, records],
-  );
-  const getAlias = (name: string) => aliasDriverName(name, driverAliasMap);
+  const records = useMemo(() => data?.violations ?? [], [data?.violations]);
+  const drivers = useMemo(() => data?.drivers ?? [], [data?.drivers]);
 
-  const dateFiltered = useMemo(
-    () => records.filter((r) => r.violation === activeViolation),
-    [records, activeViolation],
+  const extraMissingVehicles = useMemo(
+    () => drivers.filter((d) => isMissingDriver(d.name)).map((d) => d.vehicle),
+    [drivers],
   );
 
-  const filtered =
-    driverFilter === "All"
-      ? dateFiltered
-      : dateFiltered.filter((r) => r.driver === driverFilter);
+  const missingOrdinalByVehicle = useMemo(
+    () => buildVehicleMissingOrdinalMap(records, [], [], extraMissingVehicles),
+    [records, extraMissingVehicles],
+  );
+
+  const formatDriverCell = useCallback(
+    (vehicle: string, rawDriver: string) =>
+      formatDriverDisplay({
+        vehicle,
+        rawDriver,
+        missingOrdinalByVehicle,
+        violations: records,
+      }),
+    [missingOrdinalByVehicle, records],
+  );
+
+  const driverOptions = useMemo(() => {
+    const byValue = new Map<string, { label: string; vehicle: string }>();
+    for (const d of drivers) {
+      const v = String(d.vehicle ?? "").trim();
+      const raw = String(d.name ?? "").trim();
+      if (!v && !raw) continue;
+      const value = isMissingDriver(raw) ? missingDriverFilterValue(v) : monitoringDriverKey(v, raw);
+      const label = formatDriverCell(v, raw);
+      byValue.set(value, { label, vehicle: v });
+    }
+    // Also include any driver+vehicle combinations present in violations (covers cases where drivers[] is incomplete).
+    for (const r of records) {
+      const v = String(r.vehicle ?? "").trim();
+      const raw = String(r.driver ?? "").trim();
+      if (!v && !raw) continue;
+      const value = isMissingDriver(raw) ? missingDriverFilterValue(v) : monitoringDriverKey(v, raw);
+      const label = formatDriverCell(v, raw);
+      byValue.set(value, { label, vehicle: v });
+    }
+    return [...byValue.entries()]
+      .map(([value, meta]) => ({ value, label: meta.label }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [drivers, records, formatDriverCell]);
+
+  const filteredRecords = useMemo(() => {
+    if (driverFilter === "ALL") return records;
+    const missVeh = parseMissingDriverFilterValue(driverFilter);
+    if (missVeh) {
+      return records.filter((r) => String(r.vehicle ?? "").trim() === missVeh && isMissingDriver(r.driver));
+    }
+    const parsed = parseMonitoringDriverKey(driverFilter);
+    if (!parsed) return records;
+    return records.filter(
+      (r) =>
+        String(r.vehicle ?? "").trim() === parsed.vehicle
+        && String(r.driver ?? "").trim() === parsed.rawDriver,
+    );
+  }, [driverFilter, records]);
 
   const ordered = useMemo(
     () =>
-      filtered
+      filteredRecords
         .slice()
         .sort((a, b) => toDate(b.beginning).getTime() - toDate(a.beginning).getTime()),
-    [filtered],
-  );
-  const totalPages = Math.max(1, Math.ceil(filtered.length / MONITORING_PAGE_SIZE));
-  const pagedRows = ordered.slice(
-    (currentPage - 1) * MONITORING_PAGE_SIZE,
-    currentPage * MONITORING_PAGE_SIZE,
+    [filteredRecords],
   );
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- pagination returns to page 1 when filters/dates change
     setCurrentPage(1);
-  }, [activeViolation, driverFilter, startDate, endDate]);
+  }, [driverFilter, startDate, endDate]);
+
+  const driverScores = useMemo(() => {
+    const distanceByDriverKey = new Map<string, number>();
+    const vehicleByDriverKey = new Map<string, string>();
+    for (const d of drivers) {
+      const key = isMissingDriver(d.name) ? missingDriverFilterValue(d.vehicle) : monitoringDriverKey(d.vehicle, d.name);
+      distanceByDriverKey.set(key, Number(d.distance ?? 0));
+      vehicleByDriverKey.set(key, d.vehicle);
+    }
+
+    const countsByDriverKey = new Map<string, Record<string, number>>();
+    for (const r of filteredRecords) {
+      const key = isMissingDriver(r.driver) ? missingDriverFilterValue(r.vehicle) : monitoringDriverKey(r.vehicle, r.driver);
+      const current = countsByDriverKey.get(key) ?? {};
+      current[r.violation] = (current[r.violation] ?? 0) + 1;
+      countsByDriverKey.set(key, current);
+    }
+
+    const uniqueKeys = new Set<string>();
+    for (const r of filteredRecords) {
+      uniqueKeys.add(isMissingDriver(r.driver) ? missingDriverFilterValue(r.vehicle) : monitoringDriverKey(r.vehicle, r.driver));
+    }
+
+    const rows = Array.from(uniqueKeys).map((key) => {
+      const parsed = parseMissingDriverFilterValue(key) ? { vehicle: parseMissingDriverFilterValue(key)!, rawDriver: "Missing" } : parseMonitoringDriverKey(key);
+      const vehicle = parsed?.vehicle ?? "—";
+      const rawDriver = parsed?.rawDriver ?? "Missing";
+      const counts = countsByDriverKey.get(key) ?? {};
+      const distanceKm = distanceByDriverKey.get(key) ?? 0;
+      const total = VIOLATION_TYPES.reduce((sum, vt) => sum + (counts[vt] ?? 0), 0);
+      const { score, grade } = computeDriverScore({ distanceKm, counts });
+      const per100 = (count: number) => (count / Math.max(1, distanceKm || 0)) * 100;
+      return {
+        key,
+        driverLabel: formatDriverCell(vehicle, rawDriver),
+        vehicle: vehicleByDriverKey.get(key) ?? vehicle,
+        distanceKm,
+        total,
+        score,
+        grade,
+        counts,
+        rates: Object.fromEntries(VIOLATION_TYPES.map((vt) => [vt, per100(counts[vt] ?? 0)])) as Record<string, number>,
+      };
+    });
+
+    return rows.sort((a, b) => b.score - a.score || b.distanceKm - a.distanceKm);
+  }, [drivers, filteredRecords, formatDriverCell]);
+
+  const totalPages = Math.max(1, Math.ceil(driverScores.length / MONITORING_PAGE_SIZE));
 
   const selectStyle: React.CSSProperties = {
     padding: "6px 10px",
@@ -260,33 +372,17 @@ export default function Monitoring({
 
       <div style={{ display: "flex", alignItems: "center", gap: "16px", marginBottom: "16px", flexWrap: "wrap" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <span style={{ fontSize: ".66rem", color: "#000000", fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em" }}>Violation Type</span>
-          <select
-            value={activeViolation}
-            onChange={(e) => {
-              setActiveViolation(e.target.value as ViolationType);
-              setDriverFilter("All");
-            }}
-            style={{ ...selectStyle, border: "2px solid rgba(245,179,0,0.45)", background: "#fffdf3" }}
-          >
-            {VIOLATION_TYPES.map((vt) => (
-              <option key={vt} value={vt}>{vt}</option>
-            ))}
-          </select>
-        </div>
-
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
           <span style={{ fontSize: ".66rem", color: "#000000", fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em" }}>Driver</span>
           <select value={driverFilter} onChange={(e) => setDriverFilter(e.target.value)} style={selectStyle}>
-            <option value="All">All Drivers</option>
-            {drivers.map((d) => (
-              <option key={d.id} value={d.name}>{getAlias(d.name)}</option>
+            <option value="ALL">All Drivers</option>
+            {driverOptions.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
             ))}
           </select>
         </div>
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <button
-            onClick={() => exportMonitoringCSV(ordered, getAlias)}
+            onClick={() => exportMonitoringCSV(ordered, formatDriverCell)}
             style={{
               padding: "6px 10px",
               borderRadius: "var(--radius-sm)",
@@ -301,7 +397,7 @@ export default function Monitoring({
             Download Filtered Violation
           </button>
           <button
-            onClick={() => exportAllViolationsWorkbook(startDate, endDate, records, getAlias)}
+            onClick={() => exportAllViolationsWorkbook(startDate, endDate, records, formatDriverCell)}
             style={{
               padding: "6px 10px",
               borderRadius: "var(--radius-sm)",
@@ -319,58 +415,60 @@ export default function Monitoring({
       </div>
 
       <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius)", overflow: "hidden", boxShadow: "var(--shadow)" }}>
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: ".8rem", minWidth: "1100px" }}>
+        <div className="data-table-scroll" style={{ overflowX: "auto", width: "100%", minWidth: 0 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: ".8rem", minWidth: "1300px" }}>
             <thead>
               <tr style={{ background: "var(--surface2)", borderBottom: "1px solid var(--border2)" }}>
-                {["#", "Driver", "Vehicle", "Beginning", "Initial Location", "End", "Final Location", "Avg Speed", "Max Speed", "Duration", "Mileage"].map((h) => (
-                  <th key={h} style={{ ...thStyle, textAlign: ["Avg Speed", "Max Speed", "Duration", "Mileage"].includes(h) ? "right" : "left" }}>{h}</th>
+                {[
+                  "#",
+                  "Driver",
+                  "Vehicle",
+                  "Distance (km)",
+                  "Score",
+                  "Grade",
+                  "Total Violations",
+                  ...VIOLATION_TYPES.map((v) => `${v} (#/100km)`),
+                ].map((h) => (
+                  <th key={h} style={{ ...thStyle, textAlign: h.includes("(km)") || h.includes("Score") || h.includes("Total") || h.includes("#/100") ? "right" : "left" }}>
+                    {h}
+                  </th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {pagedRows.length === 0 ? (
+              {driverScores.length === 0 ? (
                 <tr>
-                  <td colSpan={11} style={{ textAlign: "center", padding: "36px", color: "var(--text3)" }}>
-                    No {activeViolation.toLowerCase()} records found for this range.
+                  <td colSpan={7 + VIOLATION_TYPES.length} style={{ textAlign: "center", padding: "36px", color: "var(--text3)" }}>
+                    No driver scoring data available for this range.
                   </td>
                 </tr>
               ) : (
-                pagedRows.map((r, idx) => (
-                  <tr key={r.id} style={{ borderBottom: "1px solid var(--border)" }}>
-                    <td style={{ padding: "10px 14px", color: "var(--text3)" }}>
-                      {(currentPage - 1) * MONITORING_PAGE_SIZE + idx + 1}
-                    </td>
-                    <td style={{ padding: "10px 14px", fontWeight: 600 }}>{getAlias(r.driver)}</td>
-                    <td style={{ padding: "10px 14px" }}>{r.vehicle}</td>
-                    <td style={{ padding: "10px 14px", color: "var(--text2)", fontFamily: "var(--font-mono)", fontSize: ".72rem" }}>{r.beginning}</td>
-                    <td style={{ padding: "10px 14px" }}>
-                      <a
-                        href={`https://www.google.com/maps?q=${encodeURIComponent(r.initialLocationCoords || r.initialLocation)}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style={{ color: "var(--blue)", textDecoration: "none", fontWeight: 600 }}
-                      >
-                        {r.initialLocation}
-                      </a>
-                    </td>
-                    <td style={{ padding: "10px 14px", color: "var(--text2)", fontFamily: "var(--font-mono)", fontSize: ".72rem" }}>{r.end}</td>
-                    <td style={{ padding: "10px 14px" }}>
-                      <a
-                        href={`https://www.google.com/maps?q=${encodeURIComponent(r.finalLocationCoords || r.finalLocation)}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style={{ color: "var(--blue)", textDecoration: "none", fontWeight: 600 }}
-                      >
-                        {r.finalLocation}
-                      </a>
-                    </td>
-                    <td style={{ padding: "10px 14px", textAlign: "right" }}>{r.avgSpeed}</td>
-                    <td style={{ padding: "10px 14px", textAlign: "right" }}>{r.maxSpeed}</td>
-                    <td style={{ padding: "10px 14px", textAlign: "right", fontFamily: "var(--font-mono)", fontSize: ".72rem" }}>{r.duration}</td>
-                    <td style={{ padding: "10px 14px", textAlign: "right" }}>{r.mileage}</td>
-                  </tr>
-                ))
+                driverScores
+                  .slice((currentPage - 1) * MONITORING_PAGE_SIZE, currentPage * MONITORING_PAGE_SIZE)
+                  .map((r, idx) => (
+                    <tr key={r.key} style={{ borderBottom: "1px solid var(--border)" }}>
+                      <td style={{ padding: "10px 14px", color: "var(--text3)" }}>
+                        {(currentPage - 1) * MONITORING_PAGE_SIZE + idx + 1}
+                      </td>
+                      <td style={{ padding: "10px 14px", fontWeight: 700 }}>{r.driverLabel}</td>
+                      <td style={{ padding: "10px 14px" }}>{r.vehicle}</td>
+                      <td style={{ padding: "10px 14px", textAlign: "right" }}>{Number(r.distanceKm ?? 0).toFixed(0)}</td>
+                      <td style={{ padding: "10px 14px", textAlign: "right", fontWeight: 800, color: r.score >= 85 ? "var(--green)" : r.score >= 70 ? "#8a5a00" : "var(--red)" }}>
+                        {r.score.toFixed(0)}
+                      </td>
+                      <td style={{ padding: "10px 14px", textAlign: "left", fontWeight: 800 }}>{r.grade}</td>
+                      <td style={{ padding: "10px 14px", textAlign: "right", fontWeight: 700 }}>{r.total}</td>
+                      {VIOLATION_TYPES.map((vt) => {
+                        const c = r.counts[vt] ?? 0;
+                        const rate = r.rates[vt] ?? 0;
+                        return (
+                          <td key={vt} style={{ padding: "10px 14px", textAlign: "right" }}>
+                            {c} ({rate.toFixed(2)})
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))
               )}
             </tbody>
           </table>

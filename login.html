@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hass Petroleum — TAT Reports Sign in</title>
+  <link rel="icon" type="image/png" href="{{ url_for('logo') }}">
+  <link rel="shortcut icon" href="{{ url_for('logo') }}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'] },
+          colors: {
+            brand: {
+              50:  '#eef2fb',
+              100: '#dbe2f5',
+              200: '#b6c4ea',
+              300: '#8aa0d8',
+              400: '#5a78c2',
+              500: '#3a59ad',
+              600: '#1f3d8f',
+              700: '#162d6f',
+              800: '#0f2156',
+              900: '#0a1740',
+              950: '#06102e',
+            },
+            gold: {
+              300: '#ffe68a',
+              400: '#fcd34d',
+              500: '#f5b806',
+              600: '#d49a00',
+            },
+          },
+        },
+      },
+    };
+  </script>
+  <style>
+    html, body { font-family: 'Inter', ui-sans-serif, system-ui, sans-serif; }
+
+    /* Single screen on desktop: no page scroll */
+    .login-root {
+      min-height: 100dvh;
+      max-height: 100dvh;
+      overflow: hidden;
+    }
+    @media (max-width: 1023px) {
+      .login-root {
+        max-height: none;
+        min-height: 100dvh;
+        overflow-y: auto;
+      }
+    }
+
+    @keyframes hero-float {
+      0%, 100% { transform: translateY(0); }
+      50%      { transform: translateY(-4px); }
+    }
+    .hero-float { animation: hero-float 4.5s ease-in-out infinite; }
+
+    @keyframes sheen-sweep {
+      0%   { transform: translateX(-120%) skewX(-12deg); opacity: 0; }
+      40%  { opacity: 1; }
+      100% { transform: translateX(220%)  skewX(-12deg); opacity: 0; }
+    }
+    .hero-sheen { animation: sheen-sweep 14s ease-in-out infinite; }
+
+    @keyframes ping-soft {
+      75%, 100% { transform: scale(2.2); opacity: 0; }
+    }
+    .ping-soft { animation: ping-soft 1.6s cubic-bezier(0,0,0.2,1) infinite; }
+
+    @keyframes spin-soft {
+      to { transform: rotate(360deg); }
+    }
+    .spin-soft { animation: spin-soft 0.9s linear infinite; }
+
+    @keyframes card-rise {
+      from { opacity: 0; transform: translateY(10px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .card-rise { animation: card-rise 0.5s cubic-bezier(.2,.8,.2,1) both; }
+
+    .warm-check { display: none; }
+    .warm-check.show { display: block; }
+    .warm-spin.hidden-spin { display: none; }
+
+    /* Hero copy: readability on busy GIF without changing wording */
+    .hero-badge-label {
+      color: #f8fafc;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.65);
+      letter-spacing: 0.06em;
+    }
+    .hero-headline {
+      color: #fafafa;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      text-shadow:
+        0 1px 1px rgba(0,0,0,0.9),
+        0 2px 16px rgba(0,0,0,0.55),
+        0 6px 40px rgba(6,16,48,0.75);
+    }
+    .hero-accent {
+      color: #fde047;
+      font-weight: 800;
+      text-shadow:
+        0 1px 2px rgba(0,0,0,0.85),
+        0 0 24px rgba(245,184,6,0.35),
+        0 4px 20px rgba(0,0,0,0.5);
+    }
+    .hero-body {
+      color: rgba(248,250,252,0.94);
+      text-shadow: 0 1px 3px rgba(0,0,0,0.75), 0 2px 14px rgba(0,0,0,0.35);
+    }
+    .hero-body-accent {
+      color: #fef08a;
+      font-weight: 600;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.8), 0 0 18px rgba(245,184,6,0.22);
+    }
+    .hero-tag {
+      color: #f8fafc;
+      border-color: rgba(253,224,71,0.35);
+      background: rgba(15,33,86,0.45);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.08);
+      text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+    }
+  </style>
+</head>
+<body class="bg-zinc-50 text-zinc-900 antialiased">
+  <div class="login-root grid min-h-0 grid-cols-1 lg:grid-cols-[1.25fr_minmax(300px,460px)] lg:h-[100dvh]">
+
+    {# ── HERO PANEL ────────────────────────────────────────────────────────── #}
+    <aside class="relative hidden min-h-0 overflow-hidden lg:block">
+      {% if hero_exists %}
+        <img src="{{ url_for('login_hero') }}"
+             alt="Hass Petroleum operations"
+             class="absolute inset-0 h-full w-full object-cover" />
+      {% else %}
+        <div class="absolute inset-0 bg-brand-900"></div>
+      {% endif %}
+
+      <div class="absolute inset-0"
+           style="background: linear-gradient(135deg, rgba(10,23,64,0.78) 0%, rgba(31,61,143,0.55) 45%, rgba(0,0,0,0.62) 100%);"></div>
+
+      <div class="absolute inset-0 bg-[radial-gradient(circle_at_30%_30%,rgba(255,230,138,0.22),transparent_55%)]"></div>
+
+      <div class="hero-sheen pointer-events-none absolute -inset-y-1/4 left-0 right-0 w-1/3 bg-gradient-to-r from-white/0 via-white/30 to-white/0"></div>
+
+      <div class="relative z-10 flex h-full min-h-0 flex-col justify-end p-6 pb-8 text-white lg:p-8 lg:pb-10">
+        <div class="max-w-xl space-y-2 lg:space-y-3">
+          <span class="hero-badge-label inline-flex items-center gap-2 rounded-full border border-white/20 bg-black/25 px-2.5 py-0.5 text-[10px] font-bold uppercase backdrop-blur-md lg:px-3 lg:py-1 lg:text-xs">
+            <span class="relative flex h-2 w-2">
+              <span class="ping-soft absolute inline-flex h-full w-full rounded-full bg-gold-400 opacity-75"></span>
+              <span class="relative inline-flex h-2 w-2 rounded-full bg-gold-400 shadow-[0_0_8px_rgba(253,224,71,0.9)]"></span>
+            </span>
+            Live operations
+          </span>
+
+          <h1 class="hero-headline text-2xl leading-snug lg:text-3xl xl:text-4xl">
+            Monitor <span class="hero-accent">live fleet positions</span> and generate <span class="hero-accent">real-time TAT reports.</span>
+          </h1>
+
+          <p class="hero-body max-w-lg text-xs font-medium leading-relaxed lg:text-sm">
+            Real-time visibility and <span class="hero-body-accent">TAT reporting</span> across the Democratic Republic of the Congo, Kenya, Rwanda, Sudan, and Uganda — in one secure Hass workspace.
+          </p>
+
+          <div class="flex flex-wrap gap-1.5 text-[10px] font-bold lg:gap-2 lg:text-xs">
+            {% for tag in ["DRC", "Kenya", "Rwanda", "Sudan", "Uganda"] %}
+              <span class="hero-tag rounded-full border px-2 py-0.5 backdrop-blur-md lg:px-3 lg:py-1">{{ tag }}</span>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    {# ── FORM PANEL ───────────────────────────────────────────────────────── #}
+    <section class="flex min-h-0 flex-col justify-center overflow-y-auto bg-zinc-50 px-4 py-4 lg:max-h-[100dvh] lg:overflow-y-hidden lg:py-3 lg:pr-5">
+      <div class="mx-auto w-full max-w-[400px] shrink-0">
+
+        <div class="mb-3 flex justify-center lg:mb-2">
+          <div class="hero-float mx-auto flex w-fit max-w-full items-center gap-2 rounded-2xl border border-brand-100 bg-white px-3 py-2 shadow-lg ring-1 ring-brand-50 lg:gap-3 lg:px-4 lg:py-2">
+            {% if logo_exists %}
+              <img src="{{ url_for('logo') }}" alt="Hass Petroleum" class="h-9 w-auto shrink-0 object-contain lg:h-10" />
+            {% endif %}
+            <div class="min-w-0">
+              <p class="text-base font-extrabold leading-tight text-brand-800 sm:text-lg">Hass Petroleum</p>
+              <p class="text-[10px] font-bold uppercase tracking-[0.18em] text-zinc-700 sm:text-[11px]">TAT Reports</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="card-rise rounded-2xl border border-zinc-200 bg-white p-5 shadow-xl lg:p-6">
+          <div class="mb-4 lg:mb-5">
+            <span class="inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-brand-800 lg:text-[11px]">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+                   stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"
+                   class="h-3 w-3 shrink-0 lg:h-3.5 lg:w-3.5" aria-hidden="true">
+                <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67 0C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.5 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>
+                <path d="m9 12 2 2 4-4"/>
+              </svg>
+              Secure sign-in
+            </span>
+            <h2 class="mt-2 text-xl font-extrabold text-zinc-900 lg:text-2xl">Welcome back</h2>
+            <p class="mt-0.5 text-xs font-medium text-zinc-600 lg:text-sm">
+              Sign in to access Hass Petroleum TAT Reports.
+            </p>
+          </div>
+
+          <form id="login-form" method="post" action="{{ url_for('login') }}" class="space-y-3 lg:space-y-4">
+            <label class="block text-xs font-semibold text-zinc-800 lg:text-sm">
+              Username
+              <input
+                type="text"
+                name="username"
+                id="login-username"
+                required
+                autocomplete="username"
+                class="mt-1 w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-900 shadow-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-200 disabled:bg-zinc-50" />
+            </label>
+
+            <label class="block text-xs font-semibold text-zinc-800 lg:text-sm">
+              Password
+              <input
+                type="password"
+                name="password"
+                id="login-password"
+                required
+                autocomplete="current-password"
+                class="mt-1 w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-900 shadow-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-200 disabled:bg-zinc-50" />
+            </label>
+
+            {% if error %}
+              <p data-server-error="1" class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-800 lg:text-sm">
+                {{ error }}
+              </p>
+            {% endif %}
+            <p id="client-error" class="hidden rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-800 lg:text-sm"></p>
+
+            <button
+              id="submit-btn"
+              type="submit"
+              class="flex w-full items-center justify-center gap-2 rounded-lg bg-brand-700 py-2 text-sm font-bold text-white shadow-md transition hover:bg-brand-800 focus:outline-none focus:ring-2 focus:ring-brand-300 disabled:opacity-70 lg:py-2.5">
+              <svg id="submit-spinner" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+                   stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"
+                   class="spin-soft hidden h-4 w-4" aria-hidden="true">
+                <path d="M21 12a9 9 0 1 1-6.22-8.56"/>
+              </svg>
+              <span id="submit-label">Sign in</span>
+            </button>
+
+            <ul id="warm-list" class="hidden mt-2 space-y-1 rounded-lg border border-zinc-200 bg-zinc-50 p-2.5 text-[11px] font-semibold text-zinc-700 lg:space-y-1.5 lg:p-3 lg:text-xs">
+              <li class="warm-row flex items-center gap-2" data-step="0">
+                <svg class="warm-spin spin-soft h-3.5 w-3.5 shrink-0 text-brand-600" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M21 12a9 9 0 1 1-6.22-8.56"/></svg>
+                <svg class="warm-check h-3.5 w-3.5 shrink-0 text-emerald-600" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg>
+                <span>Verifying credentials</span>
+              </li>
+              <li class="warm-row flex items-center gap-2" data-step="1">
+                <svg class="warm-spin spin-soft h-3.5 w-3.5 shrink-0 text-brand-600" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M21 12a9 9 0 1 1-6.22-8.56"/></svg>
+                <svg class="warm-check h-3.5 w-3.5 shrink-0 text-emerald-600" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg>
+                <span>Loading Live Positions</span>
+              </li>
+              <li class="warm-row flex items-center gap-2" data-step="2">
+                <svg class="warm-spin spin-soft h-3.5 w-3.5 shrink-0 text-brand-600" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M21 12a9 9 0 1 1-6.22-8.56"/></svg>
+                <svg class="warm-check h-3.5 w-3.5 shrink-0 text-emerald-600" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg>
+                <span>Loading TAT Reports</span>
+              </li>
+            </ul>
+          </form>
+        </div>
+
+        <a href="https://www.controltech-ea.com/"
+           target="_blank" rel="noopener noreferrer"
+           aria-label="ControlTech East Africa"
+           class="group mx-auto mt-3 flex w-fit max-w-full items-center gap-2 rounded-full border border-zinc-200 bg-white px-3 py-1 text-[11px] font-semibold text-zinc-700 shadow-sm transition hover:border-brand-300 hover:text-brand-800 hover:shadow-md lg:mt-4 lg:py-1.5 lg:text-xs">
+          {% if ct_logo_exists %}
+            <img src="{{ url_for('controltech_logo') }}" alt="ControlTech" class="h-5 w-auto rounded lg:h-6" />
+          {% endif %}
+          <span>
+            Powered by
+            <span class="font-bold text-brand-700 group-hover:underline">ControlTech</span>
+          </span>
+        </a>
+
+        <p class="mt-2 text-center text-[10px] font-medium text-zinc-500 lg:text-[11px]">
+          &copy; <span id="copyright-year"></span> Hass Petroleum Ltd
+        </p>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    document.getElementById('copyright-year').textContent = new Date().getFullYear();
+
+    const form = document.getElementById('login-form');
+    const btn = document.getElementById('submit-btn');
+    const lbl = document.getElementById('submit-label');
+    const spin = document.getElementById('submit-spinner');
+    const warm = document.getElementById('warm-list');
+    const clientErr = document.getElementById('client-error');
+
+    function resetWarmList() {
+      warm.querySelectorAll('.warm-row').forEach((row) => {
+        row.querySelector('.warm-spin').classList.remove('hidden-spin');
+        row.querySelector('.warm-check').classList.remove('show');
+      });
+    }
+
+    function tickStep(idx) {
+      const row = warm.querySelector('[data-step="' + idx + '"]');
+      if (!row) return;
+      row.querySelector('.warm-spin').classList.add('hidden-spin');
+      row.querySelector('.warm-check').classList.add('show');
+    }
+
+    function delay(ms) {
+      return new Promise((r) => setTimeout(r, ms));
+    }
+
+    /** After auth succeeds: flash each checkmark in quick succession */
+    async function playSuccessTicks() {
+      tickStep(0);
+      await delay(45);
+      tickStep(1);
+      await delay(45);
+      tickStep(2);
+      await delay(120);
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      clientErr.classList.add('hidden');
+      clientErr.textContent = '';
+      const srv = document.querySelector('[data-server-error]');
+      if (srv) srv.remove();
+
+      btn.disabled = true;
+      lbl.textContent = 'Signing in…';
+      spin.classList.remove('hidden');
+      warm.classList.remove('hidden');
+      resetWarmList();
+
+      const fd = new FormData(form);
+      try {
+        const r = await fetch(form.action, {
+          method: 'POST',
+          body: fd,
+          credentials: 'same-origin',
+          redirect: 'manual',
+        });
+
+        if (r.status === 302 || r.status === 303) {
+          const loc = r.headers.get('Location') || '{{ url_for("dashboard") }}';
+          await playSuccessTicks();
+          window.location.href = loc;
+          return;
+        }
+
+        const html = await r.text();
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        const errEl = doc.querySelector('[data-server-error], .text-red-800');
+        const msg = errEl && errEl.textContent ? errEl.textContent.trim() : 'Sign-in failed. Try again.';
+
+        lbl.textContent = 'Sign in';
+        spin.classList.add('hidden');
+        warm.classList.add('hidden');
+        btn.disabled = false;
+        resetWarmList();
+
+        clientErr.textContent = msg;
+        clientErr.classList.remove('hidden');
+      } catch {
+        lbl.textContent = 'Sign in';
+        spin.classList.add('hidden');
+        warm.classList.add('hidden');
+        btn.disabled = false;
+        resetWarmList();
+        clientErr.textContent = 'Network error. Try again.';
+        clientErr.classList.remove('hidden');
+      }
+    });
+  </script>
+</body>
+</html>

@@ -6,7 +6,12 @@ import type { DateRange } from "./dateRange";
 
 export function useWialonData(
   range: DateRange,
-  options?: { initialData?: WialonDataset | null; skipInitialFetch?: boolean },
+  options?: {
+    initialData?: WialonDataset | null;
+    skipInitialFetch?: boolean;
+    /** Increment when the user clicks Run so we refetch even if the date range strings are unchanged. */
+    refreshNonce?: number;
+  },
 ) {
   const [data, setData] = useState<WialonDataset | null>(options?.initialData ?? null);
   const [loading, setLoading] = useState(false);
@@ -65,7 +70,7 @@ export function useWialonData(
       alive = false;
       controller.abort();
     };
-  }, [range.start, range.end, options?.skipInitialFetch, options?.initialData]);
+  }, [range.start, range.end, options?.skipInitialFetch, options?.initialData, options?.refreshNonce]);
 
   return { data, loading, error };
 }

@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import {
-  DRIVER_MAP,
   VIOLATION_TYPES,
   type Driver,
   type FinalReportRow,
   type FuelRecord,
+  type SpeedRecord,
   type VehiclePerformance,
   type ViolationRecord,
   type WialonDataset,
@@ -14,6 +14,34 @@ const API_URL = "https://hst-api.wialon.com/wialon/ajax.html";
 const REPORT_RESOURCE_ID = 17082202;
 const REPORT_TEMPLATE_ID = 220;
 const REPORT_OBJECT_ID = 30182477;
+
+const DIAGNOSTIC_TYPES = [
+  "Accelerator < 40 %",
+  "Green Band Driving",
+  "Accelerator > 70%",
+  "Engine Stress",
+  "Engine Temp >105°",
+] as const;
+
+const ECODRIVING_ALLOWED_TYPES = new Set<string>([...VIOLATION_TYPES, ...DIAGNOSTIC_TYPES]);
+
+function normalizeEcoDrivingViolation(value: string) {
+  const normalized = String(value ?? "").trim();
+  const comparable = normalized.toLowerCase().replace(/[\s_-]+/g, "");
+  if (comparable === "freewheeling" || comparable === "freewheelingserverside") {
+    return "Free Wheeling";
+  }
+  return normalized;
+}
+
+function decodeHtmlEntities(value: string) {
+  return String(value ?? "")
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">")
+    .replaceAll("&amp;", "&")
+    .replaceAll("&quot;", "\"")
+    .replaceAll("&#39;", "'");
+}
 
 function toNumber(value: unknown): number {
   const match = String(value ?? "").match(/([0-9]+(?:\.[0-9]+)?)/);
@@ -36,9 +64,19 @@ function durationToSeconds(value: string): number {
 }
 
 function splitGrouping(grouping: string) {
-  const parts = grouping.split(" - ");
-  const vehicle = (parts[1] ?? parts[0] ?? "").trim();
-  const driver = DRIVER_MAP[vehicle] ?? vehicle;
+  const parts = grouping
+    .split(" - ")
+    .map((p) => String(p ?? "").trim())
+    .filter(Boolean);
+
+  // In this report template, the "Grouping" cell often encodes unit grouping like:
+  // - Old: "ENA COACH - KDE 181Q"
+  // - New: "ENA - KDE 181Q - FMC150"
+  //
+  // We want the vehicle registration (middle segment when present).
+  const left = String(parts[0] ?? "").trim();
+  const vehicle = String(parts[1] ?? parts[0] ?? "").trim();
+  const driver = "";
   return { vehicle, driver };
 }
 
@@ -122,6 +160,44 @@ function pickColumnIndex(headers: string[], regex: RegExp) {
   return headers.findIndex((h) => regex.test(String(h).toLowerCase()));
 }
 
+function pickAny(headers: string[], patterns: RegExp[]) {
+  for (const p of patterns) {
+    const idx = pickColumnIndex(headers, p);
+    if (idx >= 0) return idx;
+  }
+  return -1;
+}
+
+function sumFuelByVehicle(
+  records: FuelRecord[],
+  opts: { valueKey: RegExp; vehicleKey?: RegExp },
+) {
+  const totalLitres = new Map<string, number>();
+  const count = new Map<string, number>();
+
+  for (const r of records) {
+    const vehicle = String(r.vehicle ?? "").trim();
+    if (!vehicle) continue;
+
+    const keys = Object.keys(r.columns ?? {});
+    const valueCol = keys.find((k) => opts.valueKey.test(k.toLowerCase()));
+    const raw = valueCol ? r.columns[valueCol] : "";
+    const litres = toNumber(raw);
+    if (!(litres > 0)) continue;
+
+    totalLitres.set(vehicle, (totalLitres.get(vehicle) ?? 0) + litres);
+    count.set(vehicle, (count.get(vehicle) ?? 0) + 1);
+  }
+
+  return { totalLitres, count };
+}
+
+function kmPerLFromAbsFcsLPer100Km(raw: string) {
+  const lPer100 = toNumber(raw);
+  if (!(lPer100 > 0)) return 0;
+  return 100 / lPer100;
+}
+
 function rowsToFuelRecords(
   tableHeaders: string[],
   rows: RawRow[],
@@ -146,7 +222,7 @@ function rowsToFuelRecords(
     return {
       id: baseId + index + 1,
       grouping: vehicle || grouping,
-      driver: driverIdx >= 0 ? cellText(cells[driverIdx]) || driver : driver,
+      driver: driverIdx >= 0 ? cellText(cells[driverIdx]) || driver || "Missing" : (driver || "Missing"),
       vehicle,
       location,
       locationCoords,
@@ -181,6 +257,49 @@ async function callWialon<T>(svc: string, params: object, sid: string) {
   return payload as T;
 }
 
+function rowsToSpeedRecords(
+  tableHeaders: string[],
+  rows: RawRow[],
+  baseId: number,
+): SpeedRecord[] {
+  // Notebook/Wialon columns:
+  // Grouping | Driver | Initial location | Final location | Mileage | Avg. speed | Duration
+  const groupingIdx = pickColumnIndex(tableHeaders, /group/);
+  const driverIdx = pickColumnIndex(tableHeaders, /driver/);
+  const initialIdx = pickColumnIndex(tableHeaders, /initial.*location|start.*location|from|initial/);
+  const finalIdx = pickColumnIndex(tableHeaders, /final.*location|end.*location|to|final/);
+  const mileageIdx = pickColumnIndex(tableHeaders, /mileage|distance/);
+  const avgSpeedIdx = pickColumnIndex(tableHeaders, /avg.*speed/);
+  const durationIdx = pickColumnIndex(tableHeaders, /duration/);
+
+  return rows.map((row, index) => {
+    const cells = row.c ?? [];
+    const grouping = groupingIdx >= 0 ? cellText(cells[groupingIdx]) : cellText(cells[0]);
+    const parsed = splitGrouping(grouping);
+    const driverCell = driverIdx >= 0 ? cellText(cells[driverIdx]) : "";
+    const driver = (driverCell || parsed.driver || "").trim();
+    const vehicle = (parsed.vehicle || "").trim();
+    const initialLocation = initialIdx >= 0 ? cellText(cells[initialIdx]) : "";
+    const finalLocation = finalIdx >= 0 ? cellText(cells[finalIdx]) : "";
+    const initialLocationCoords = initialIdx >= 0 ? cellCoords(cells[initialIdx]) : "";
+    const finalLocationCoords = finalIdx >= 0 ? cellCoords(cells[finalIdx]) : "";
+
+    return {
+      id: baseId + index + 1,
+      grouping,
+      driver,
+      vehicle,
+      initialLocation,
+      initialLocationCoords,
+      finalLocation,
+      finalLocationCoords,
+      mileage: mileageIdx >= 0 ? cellText(cells[mileageIdx]) : "",
+      avgSpeed: avgSpeedIdx >= 0 ? cellText(cells[avgSpeedIdx]) : "",
+      duration: durationIdx >= 0 ? cellText(cells[durationIdx]) : "",
+    };
+  });
+}
+
 export async function GET(request: Request) {
   try {
     const token = process.env.WIALON_TOKEN;
@@ -200,6 +319,12 @@ export async function GET(request: Request) {
 
     const from = Math.floor(new Date(fromISO).getTime() / 1000);
     const to = Math.floor(new Date(toISO).getTime() / 1000);
+    if (!Number.isFinite(from) || !Number.isFinite(to) || from >= to) {
+      return NextResponse.json(
+        { error: "Invalid from/to date range. Use valid ISO datetimes (from < to)." },
+        { status: 400 },
+      );
+    }
 
     const loginResponse = await fetch(
       `${API_URL}?svc=token/login&params=${encodeURIComponent(JSON.stringify({ token }))}`,
@@ -213,7 +338,7 @@ export async function GET(request: Request) {
       throw new Error(`Wialon token/login error ${login.error}${login.reason ? `: ${login.reason}` : ""}`);
     }
     const sid = login.eid;
-    if (!sid) {
+    if (typeof sid !== "string" || !sid) {
       throw new Error("Wialon login failed.");
     }
 
@@ -253,25 +378,87 @@ export async function GET(request: Request) {
       }
     }
 
-    const drivers: Driver[] = summaryRows.map((row, index) => {
+    // Fuel tables (fillings/drains) — same indices as enacoach.ipynb: table 3 = fillings, 4 = drains.
+    // Do NOT detailize every table from index 3 upward (that hits idling/speed/etc. and can break Wialon or time out).
+    const FUEL_FILLINGS_TABLE_INDEX = 3;
+    const FUEL_DRAINS_TABLE_INDEX = 4;
+
+    const detail_ena_coach_fillings: FuelRecord[] = [];
+    const detail_ena_coach_drains: FuelRecord[] = [];
+    let fuelIdBase = 0;
+
+    async function loadFuelDetailTable(tableIndex: number, sessionId: string): Promise<FuelRecord[]> {
+      const table = tables[tableIndex];
+      const rowsCount = table?.rows ?? 0;
+      if (!rowsCount) return [];
+      let rows = await fetchTableSubrows(tableIndex, rowsCount, sessionId);
+      if (!rows.length) {
+        rows = await fetchTableRows(tableIndex, rowsCount, sessionId);
+      }
+      const mapped = rowsToFuelRecords(table?.header ?? [], rows, fuelIdBase);
+      fuelIdBase += mapped.length;
+      return mapped;
+    }
+
+    if (tables.length > FUEL_FILLINGS_TABLE_INDEX) {
+      detail_ena_coach_fillings.push(...(await loadFuelDetailTable(FUEL_FILLINGS_TABLE_INDEX, sid)));
+    }
+    if (tables.length > FUEL_DRAINS_TABLE_INDEX) {
+      detail_ena_coach_drains.push(...(await loadFuelDetailTable(FUEL_DRAINS_TABLE_INDEX, sid)));
+    }
+
+    const fillingsAgg = sumFuelByVehicle(detail_ena_coach_fillings, { valueKey: /filled\b/i });
+    const drainsAgg = sumFuelByVehicle(detail_ena_coach_drains, { valueKey: /drained\b/i });
+
+    const driverByVehicle = new Map<string, string>();
+    for (const row of locationRows) {
       const cells = row.c ?? [];
       const grouping = cellText(cells[0]);
-      const { driver, vehicle } = splitGrouping(grouping);
+      const { vehicle } = splitGrouping(grouping);
+      const driverName = String(cellText(cells[4]) ?? "").trim();
+      if (vehicle && driverName && driverName !== "-----" && driverName !== "—") {
+        driverByVehicle.set(vehicle, driverName);
+      }
+    }
+
+    const resolveDriver = (vehicle: string, rawName?: string) => {
+      const normalized = String(rawName ?? "").trim();
+      if (normalized && normalized !== "-----" && normalized !== "—") return normalized;
+      return driverByVehicle.get(vehicle) ?? "Missing";
+    };
+
+    const summaryHeaders = tables[0]?.header ?? [];
+    const idxGrouping = pickAny(summaryHeaders, [/group/]);
+    const idxMileage = pickAny(summaryHeaders, [/mileage in all messages|mileage|distance/]);
+    const idxAvgSpeed = pickAny(summaryHeaders, [/avg\.?\s*speed/]);
+    const idxMaxSpeed = pickAny(summaryHeaders, [/max\.?\s*speed/]);
+    const idxEngineHours = pickAny(summaryHeaders, [/engine hours|engine time|engine running time/]);
+    const idxAbsFcsConsumption = pickAny(summaryHeaders, [/avg\.?\s*consumption by absfcs/]);
+    const idxFuelConsumed = pickAny(summaryHeaders, [/consumed by absfcs|fuel consumed|consumed/]);
+
+    const drivers: Driver[] = summaryRows.map((row, index) => {
+      const cells = row.c ?? [];
+      const grouping = cellText(cells[idxGrouping >= 0 ? idxGrouping : 0]);
+      const { vehicle } = splitGrouping(grouping);
+      const driver = resolveDriver(vehicle, driverByVehicle.get(vehicle));
+      const engineHoursRaw = cellText(cells[idxEngineHours >= 0 ? idxEngineHours : 4]) || "N/A";
+      const absFcsConsumptionRaw = cellText(cells[idxAbsFcsConsumption >= 0 ? idxAbsFcsConsumption : 0]);
+      const avgConsumptionKmPerL = kmPerLFromAbsFcsLPer100Km(absFcsConsumptionRaw);
       return {
         id: `D${String(index + 1).padStart(3, "0")}`,
         name: driver,
         vehicle,
-        distance: toNumber(cellText(cells[1])),
-        avgSpeed: toNumber(cellText(cells[2])),
-        maxSpeed: toNumber(cellText(cells[3])),
-        engineRunningTime: cellText(cells[4]) || "N/A",
+        distance: toNumber(cellText(cells[idxMileage >= 0 ? idxMileage : 1])),
+        avgSpeed: toNumber(cellText(cells[idxAvgSpeed >= 0 ? idxAvgSpeed : 2])),
+        maxSpeed: toNumber(cellText(cells[idxMaxSpeed >= 0 ? idxMaxSpeed : 3])),
+        engineRunningTime: engineHoursRaw,
         idlingEngineTime: idlingByVehicle.get(vehicle) ?? "00:00:00",
-        avgConsumption: toNumber(cellText(cells[5])),
-        totalFillings: toNumber(cellText(cells[6])),
-        totalDrains: toNumber(cellText(cells[7])),
-        fuelFilled: toNumber(cellText(cells[8])),
-        fuelDrained: toNumber(cellText(cells[9])),
-        fuelConsumed: toNumber(cellText(cells[10])),
+        avgConsumption: avgConsumptionKmPerL,
+        totalFillings: fillingsAgg.count.get(vehicle) ?? 0,
+        totalDrains: drainsAgg.count.get(vehicle) ?? 0,
+        fuelFilled: fillingsAgg.totalLitres.get(vehicle) ?? 0,
+        fuelDrained: drainsAgg.totalLitres.get(vehicle) ?? 0,
+        fuelConsumed: toNumber(cellText(cells[idxFuelConsumed >= 0 ? idxFuelConsumed : 10])),
         propulsion: "Diesel",
         transportWorkAvg: 0,
       };
@@ -288,15 +475,17 @@ export async function GET(request: Request) {
       for (const detail of toRows(subRows)) {
         const cells = detail.c ?? [];
         const grouping = cellText(cells[1]);
-        const { driver, vehicle } = splitGrouping(grouping);
-        const violation = cellText(cells[2]);
-        if (!VIOLATION_TYPES.includes(violation as (typeof VIOLATION_TYPES)[number])) continue;
+        const { vehicle } = splitGrouping(grouping);
+        const driver = resolveDriver(vehicle, driverByVehicle.get(vehicle));
+        const violation = decodeHtmlEntities(cellText(cells[2]));
+        const normalizedViolation = normalizeEcoDrivingViolation(violation);
+        if (!ECODRIVING_ALLOWED_TYPES.has(normalizedViolation)) continue;
         violations.push({
           id: violations.length + 1,
           grouping,
           driver,
           vehicle,
-          violation,
+          violation: normalizedViolation,
           beginning: shiftWialonDateTime(cellText(cells[3]), 3),
           initialLocation: cellText(cells[4]),
           initialLocationCoords: cellCoords(cells[4]),
@@ -385,15 +574,28 @@ export async function GET(request: Request) {
       };
     });
 
+    const speed: SpeedRecord[] = [];
+    const speedTable = tables[6];
+    const speedRowsCount = speedTable?.rows ?? 0;
+    if (speedTable && speedRowsCount > 0) {
+      // Detailization flow like notebook: fetch subrows per parent row.
+      let rows = await fetchTableSubrows(6, speedRowsCount, sid);
+      if (!rows.length) {
+        rows = await fetchTableRows(6, speedRowsCount, sid);
+      }
+      const mapped = rowsToSpeedRecords(speedTable.header ?? [], rows, 0);
+      speed.push(...mapped);
+    }
+
     const vehicleLocations = locationRows.map((row) => {
       const cells = row.c ?? [];
       const grouping = cellText(cells[0]);
-      const { driver, vehicle } = splitGrouping(grouping);
+      const { vehicle } = splitGrouping(grouping);
       const lastMessageTime = shiftWialonDateTime(cellText(cells[1]), 3);
       const lastCoordinatesTime = shiftWialonDateTime(cellText(cells[2]), 3);
       const location = cellText(cells[3]);
       const locationCoords = cellCoords(cells[3]);
-      const dfDriver = cellText(cells[4]) || driver;
+      const dfDriver = resolveDriver(vehicle, String(cellText(cells[4]) || "").trim());
       return {
         vehicle,
         driver: dfDriver,
@@ -404,32 +606,10 @@ export async function GET(request: Request) {
       };
     });
 
-    const detail_ena_coach_fillings: FuelRecord[] = [];
-    const detail_ena_coach_drains: FuelRecord[] = [];
-    let fuelIdBase = 0;
-    for (let tableIndex = 3; tableIndex < tables.length; tableIndex += 1) {
-      const table = tables[tableIndex];
-      const header = (table?.header ?? []).map((h) => String(h).toLowerCase()).join(" ");
-      const rowsCount = table?.rows ?? 0;
-      if (!rowsCount) continue;
-      // Match notebook detailization flow: fetch per-parent-row subrows.
-      let rows = await fetchTableSubrows(tableIndex, rowsCount, sid);
-      if (!rows.length) {
-        // Fallback for non-detailized tables.
-        rows = await fetchTableRows(tableIndex, rowsCount, sid);
-      }
-      const mapped = rowsToFuelRecords(table?.header ?? [], rows, fuelIdBase);
-      fuelIdBase += mapped.length;
-      if (header.includes("drain")) {
-        detail_ena_coach_drains.push(...mapped);
-      } else if (header.includes("fill")) {
-        detail_ena_coach_fillings.push(...mapped);
-      }
-    }
-
     const payload: WialonDataset = {
       drivers,
       violations,
+      speed,
       vehiclePerformance,
       finalReport,
       vehicleLocations,
@@ -442,6 +622,7 @@ export async function GET(request: Request) {
     return NextResponse.json(payload, { status: 200 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown Wialon error.";
+    console.error("[api/wialon/report]", message);
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

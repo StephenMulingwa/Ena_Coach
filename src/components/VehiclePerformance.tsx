@@ -1,12 +1,13 @@
-﻿"use client";
+"use client";
 
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useCallback, useMemo, useState } from "react";
 import PageHeader from "./PageHeader";
 import DateFilter from "./DateFilter";
 import type { SharedTabProps } from "../lib/data";
 import { CornerDownRight, Truck } from "lucide-react";
 import * as XLSX from "xlsx";
-import { aliasDriverName, buildDriverAliasMap } from "../lib/driverAlias";
+import { buildVehicleMissingOrdinalMap, formatDriverDisplay, isMissingDriver } from "../lib/driverDisplay";
+import { downloadPdfTable } from "../lib/exportPdfTable";
 
 function makeTimestamp() {
   const now = new Date();
@@ -29,12 +30,22 @@ export default function VehiclePerformancePage({
   onEndChange,
   onRun,
 }: SharedTabProps) {
-  const drivers = data?.drivers ?? [];
-  const vehiclePerformance = data?.vehiclePerformance ?? [];
+  const drivers = useMemo(() => data?.drivers ?? [], [data?.drivers]);
+  const violations = useMemo(() => data?.violations ?? [], [data?.violations]);
+  const vehiclePerformance = useMemo(() => data?.vehiclePerformance ?? [], [data?.vehiclePerformance]);
   const [expandedVehicle, setExpandedVehicle] = useState<string | null>(null);
-  const driverAliasMap = useMemo(
-    () => buildDriverAliasMap([...drivers.map((d) => d.name), ...vehiclePerformance.flatMap((v) => v.drivers.map((dd) => dd.driverName))]),
-    [drivers, vehiclePerformance],
+  const extraMissingVehicles = useMemo(
+    () => drivers.filter((d) => isMissingDriver(d.name)).map((d) => d.vehicle),
+    [drivers],
+  );
+  const missingOrdinalByVehicle = useMemo(
+    () => buildVehicleMissingOrdinalMap(violations, [], [], extraMissingVehicles),
+    [violations, extraMissingVehicles],
+  );
+  const driverLabel = useCallback(
+    (vehicle: string, rawName: string) =>
+      formatDriverDisplay({ vehicle, rawDriver: rawName, missingOrdinalByVehicle, violations }),
+    [missingOrdinalByVehicle, violations],
   );
 
   const perfByVehicle = useMemo(() => {
@@ -52,8 +63,9 @@ export default function VehiclePerformancePage({
         distanceKm: d.distance,
         consumedFuelL: d.fuelConsumed,
         consumptionKmPerL: d.avgConsumption.toFixed(2),
-        totalFillings: d.totalFillings,
+        fuelFillsCount: d.totalFillings,
         totalFilledL: d.fuelFilled,
+        fuelDrainsCount: d.totalDrains,
         totalDrainedL: d.fuelDrained,
         avgSpeedKmH: d.avgSpeed,
         engineTime: d.engineRunningTime,
@@ -62,17 +74,19 @@ export default function VehiclePerformancePage({
       const perf = perfByVehicle.get(d.vehicle);
       for (const dd of perf?.drivers ?? []) {
         const summaryDriver =
-          drivers.find((drv) => drv.name === dd.driverName) ??
+          drivers.find((drv) => drv.id === dd.driverId) ??
+          drivers.find((drv) => drv.name === dd.driverName && drv.vehicle === d.vehicle) ??
           drivers.find((drv) => drv.vehicle === d.vehicle) ??
           d;
         rows.push({
           level: "Driver Detail",
-          name: aliasDriverName(dd.driverName, driverAliasMap),
+          name: driverLabel(d.vehicle, dd.driverName),
           distanceKm: dd.distanceKm,
           consumedFuelL: dd.consumptionLitres,
           consumptionKmPerL: dd.consumptionKmPerL.toFixed(2),
-          totalFillings: summaryDriver.totalFillings,
+          fuelFillsCount: summaryDriver.totalFillings,
           totalFilledL: summaryDriver.fuelFilled,
+          fuelDrainsCount: summaryDriver.totalDrains,
           totalDrainedL: summaryDriver.fuelDrained,
           avgSpeedKmH: summaryDriver.avgSpeed,
           engineTime: summaryDriver.engineRunningTime,
@@ -81,7 +95,44 @@ export default function VehiclePerformancePage({
       }
     }
     return rows;
-  }, [drivers, perfByVehicle, driverAliasMap]);
+  }, [drivers, perfByVehicle, driverLabel]);
+
+  const downloadVehiclePerformancePdf = () => {
+    const head = [[
+      "Level",
+      "Name",
+      "Distance (km)",
+      "Consumed Fuel (L)",
+      "Consumption (km/L)",
+      "# Fillings",
+      "Total Filled (L)",
+      "# Drains",
+      "Total Drained (L)",
+      "Avg Speed",
+      "Engine Hours",
+      "Idling Time",
+    ]];
+    const body = vehicleRowsForDownload.map((row) => [
+      String(row.level),
+      String(row.name),
+      row.distanceKm,
+      row.consumedFuelL,
+      row.consumptionKmPerL,
+      row.fuelFillsCount,
+      row.totalFilledL,
+      row.fuelDrainsCount,
+      row.totalDrainedL,
+      row.avgSpeedKmH,
+      row.engineTime,
+      row.idlingTime,
+    ]);
+    downloadPdfTable({
+      title: "Vehicle Performance",
+      head,
+      body,
+      fileName: `vehicle_performance_${makeTimestamp()}.pdf`,
+    });
+  };
 
   const downloadVehiclePerformanceXlsx = () => {
     const rows = vehicleRowsForDownload.map((row) => ({
@@ -90,11 +141,12 @@ export default function VehiclePerformancePage({
       "Distance (km)": row.distanceKm,
       "Consumed Fuel (L)": row.consumedFuelL,
       "Consumption (km/L)": row.consumptionKmPerL,
-      "Total Fillings": row.totalFillings,
+      "# Fillings": row.fuelFillsCount,
       "Total Filled": row.totalFilledL,
+      "# Drains": row.fuelDrainsCount,
       "Total Drained": row.totalDrainedL,
       "Avg Speed": row.avgSpeedKmH,
-      "Engine Time": row.engineTime,
+      "Engine Hours": row.engineTime,
       "Idling Time": row.idlingTime,
     }));
     const sheet = XLSX.utils.json_to_sheet(rows);
@@ -116,7 +168,7 @@ export default function VehiclePerformancePage({
   };
 
   return (
-    <div>
+    <div style={{ width: "100%", maxWidth: "100%", minWidth: 0, overflowX: "auto", overflowY: "visible" }}>
       <PageHeader
         title="Vehicle"
         titleAccent="Performance"
@@ -134,7 +186,7 @@ export default function VehiclePerformancePage({
       {error && <p style={{ color: "var(--red)", marginBottom: 12, fontSize: ".82rem" }}>{error}</p>}
 
       <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius)", overflow: "hidden", boxShadow: "var(--shadow)" }}>
-        <div style={{ overflowX: "auto" }}>
+        <div className="data-table-scroll" style={{ overflowX: "auto", width: "100%", minWidth: 0 }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: ".8rem", minWidth: "1100px" }}>
             <thead>
               <tr style={{ background: "var(--surface2)", borderBottom: "1px solid var(--border2)" }}>
@@ -143,11 +195,12 @@ export default function VehiclePerformancePage({
                 <th style={{ ...thStyle, textAlign: "right" }}>Distance (km)</th>
                 <th style={{ ...thStyle, textAlign: "right" }}>Consumed Fuel (L)</th>
                 <th style={{ ...thStyle, textAlign: "right" }}>Consumption (km/L)</th>
-                <th style={{ ...thStyle, textAlign: "right" }}>Total Fillings</th>
+                <th style={{ ...thStyle, textAlign: "right" }}># Fillings</th>
                 <th style={{ ...thStyle, textAlign: "right" }}>Total Filled</th>
+                <th style={{ ...thStyle, textAlign: "right" }}># Drains</th>
                 <th style={{ ...thStyle, textAlign: "right" }}>Total Drained</th>
                 <th style={{ ...thStyle, textAlign: "right" }}>Avg Speed</th>
-                <th style={{ ...thStyle, textAlign: "right" }}>Engine Time</th>
+                <th style={{ ...thStyle, textAlign: "right" }}>Engine Hours</th>
                 <th style={{ ...thStyle, textAlign: "right" }}>Idling Time</th>
               </tr>
             </thead>
@@ -189,6 +242,7 @@ export default function VehiclePerformancePage({
                       <td style={{ padding: "10px 14px", textAlign: "right" }}>{d.avgConsumption.toFixed(2)}</td>
                       <td style={{ padding: "10px 14px", textAlign: "right" }}>{d.totalFillings}</td>
                       <td style={{ padding: "10px 14px", textAlign: "right" }}>{d.fuelFilled.toLocaleString()}</td>
+                      <td style={{ padding: "10px 14px", textAlign: "right" }}>{d.totalDrains}</td>
                       <td style={{ padding: "10px 14px", textAlign: "right" }}>{d.fuelDrained.toLocaleString()}</td>
                       <td style={{ padding: "10px 14px", textAlign: "right" }}>{d.avgSpeed}</td>
                       <td style={{ padding: "10px 14px", textAlign: "right" }}>{d.engineRunningTime}</td>
@@ -199,7 +253,8 @@ export default function VehiclePerformancePage({
                       detailDrivers.length ? (
                         detailDrivers.map((dd) => {
                           const summaryDriver =
-                            drivers.find((drv) => drv.name === dd.driverName) ??
+                            drivers.find((drv) => drv.id === dd.driverId) ??
+                            drivers.find((drv) => drv.name === dd.driverName && drv.vehicle === d.vehicle) ??
                             drivers.find((drv) => drv.vehicle === d.vehicle) ??
                             d;
                           return (
@@ -209,15 +264,16 @@ export default function VehiclePerformancePage({
                             </td>
                             <td style={{ padding: "8px 14px", display: "flex", alignItems: "center", gap: "8px", paddingLeft: "20px" }}>
                               <div style={{ width: "26px", height: "26px", borderRadius: "50%", background: "var(--blue)", color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontSize: ".72rem", fontWeight: 800 }}>
-                                {aliasDriverName(dd.driverName, driverAliasMap).split(" ").slice(-1)[0]?.charAt(0) ?? "D"}
+                                {(driverLabel(d.vehicle, dd.driverName).split(" ").slice(-1)[0]?.charAt(0) ?? "D").toUpperCase()}
                               </div>
-                              <span style={{ fontWeight: 800 }}>{aliasDriverName(dd.driverName, driverAliasMap)}</span>
+                              <span style={{ fontWeight: 800 }}>{driverLabel(d.vehicle, dd.driverName)}</span>
                             </td>
                             <td style={{ padding: "8px 14px", textAlign: "right" }}>{dd.distanceKm.toLocaleString()}</td>
                             <td style={{ padding: "8px 14px", textAlign: "right" }}>{dd.consumptionLitres.toLocaleString()}</td>
                             <td style={{ padding: "8px 14px", textAlign: "right" }}>{dd.consumptionKmPerL.toFixed(2)}</td>
                             <td style={{ padding: "8px 14px", textAlign: "right" }}>{summaryDriver.totalFillings}</td>
                             <td style={{ padding: "8px 14px", textAlign: "right" }}>{summaryDriver.fuelFilled.toLocaleString()}</td>
+                            <td style={{ padding: "8px 14px", textAlign: "right" }}>{summaryDriver.totalDrains}</td>
                             <td style={{ padding: "8px 14px", textAlign: "right" }}>{summaryDriver.fuelDrained.toLocaleString()}</td>
                             <td style={{ padding: "8px 14px", textAlign: "right" }}>{summaryDriver.avgSpeed}</td>
                             <td style={{ padding: "8px 14px", textAlign: "right" }}>{summaryDriver.engineRunningTime}</td>
@@ -241,6 +297,23 @@ export default function VehiclePerformancePage({
         </div>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "10px 14px", borderTop: "1px solid var(--border)" }}>
           <button
+            type="button"
+            onClick={downloadVehiclePerformancePdf}
+            style={{
+              padding: "8px 12px",
+              fontSize: ".76rem",
+              borderRadius: "var(--radius-sm)",
+              border: "1px solid rgba(47,111,237,0.35)",
+              background: "rgba(47,111,237,0.1)",
+              color: "var(--blue)",
+              fontWeight: 700,
+              cursor: "pointer",
+            }}
+          >
+            Download PDF
+          </button>
+          <button
+            type="button"
             onClick={downloadVehiclePerformanceXlsx}
             style={{
               padding: "8px 12px",
