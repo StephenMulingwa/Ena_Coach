@@ -137,6 +137,37 @@ body::before {
   }
 }
 
+/* Login two-column grid: SSR-safe (CSS-only, no JS flash on reload) */
+.login-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+}
+@media (min-width: 1024px) {
+  .login-grid {
+    grid-template-columns: 1.25fr minmax(320px, 480px);
+  }
+}
+
+/* Hero (left) panel: hidden on small screens, shown on desktop */
+.login-hero {
+  display: none;
+}
+@media (min-width: 1024px) {
+  .login-hero {
+    display: block;
+  }
+}
+
+/* Form (right) panel padding tweaks for narrow viewports */
+.login-form-panel {
+  padding: 32px 20px;
+}
+@media (min-width: 1024px) {
+  .login-form-panel {
+    padding: 32px 40px;
+  }
+}
+
 @keyframes card-rise {
   from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: translateY(0); }

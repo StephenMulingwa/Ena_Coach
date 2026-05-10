@@ -22,17 +22,9 @@ export default function Login({ onLogin }: LoginProps) {
   const [loading, setLoading] = useState(false);
   const [progressStep, setProgressStep] = useState(-1);
   const [year, setYear] = useState<number | null>(null);
-  const [isWide, setIsWide] = useState(false);
 
   useEffect(() => {
     setYear(new Date().getFullYear());
-  }, []);
-
-  useEffect(() => {
-    const update = () => setIsWide(window.matchMedia("(min-width: 1024px)").matches);
-    update();
-    window.addEventListener("resize", update);
-    return () => window.removeEventListener("resize", update);
   }, []);
 
   useEffect(() => {
@@ -69,23 +61,21 @@ export default function Login({ onLogin }: LoginProps) {
 
   return (
     <div
-      className="login-root"
+      className="login-root login-grid"
       style={{
-        display: "grid",
-        gridTemplateColumns: isWide ? "1.25fr minmax(320px, 480px)" : "1fr",
         background: "var(--bg)",
         color: "var(--text)",
       }}
     >
       {/* ─────────────── HERO PANEL (LEFT) ─────────────── */}
-      {isWide && (
-        <aside
-          style={{
-            position: "relative",
-            overflow: "hidden",
-            minHeight: "100dvh",
-          }}
-        >
+      <aside
+        className="login-hero"
+        style={{
+          position: "relative",
+          overflow: "hidden",
+          minHeight: "100dvh",
+        }}
+      >
           {/* Animated Ena Coach GIF background */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
@@ -284,15 +274,14 @@ export default function Login({ onLogin }: LoginProps) {
             </div>
           </div>
         </aside>
-      )}
 
       {/* ─────────────── FORM PANEL (RIGHT) ─────────────── */}
       <section
+        className="login-form-panel"
         style={{
           display: "flex",
           flexDirection: "column",
           justifyContent: "center",
-          padding: isWide ? "32px 40px" : "32px 20px",
           background: "var(--bg)",
           position: "relative",
           minHeight: "100dvh",
