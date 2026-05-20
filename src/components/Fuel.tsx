@@ -12,6 +12,15 @@ import {
   missingDriverFilterValue,
   parseMissingDriverFilterValue,
 } from "../lib/driverDisplay";
+import {
+  SortHeader,
+  parseDateTimeMs,
+  parseFirstNumber,
+  sortRowsBy,
+  useTableSort,
+  type SortState,
+} from "../lib/sortableTable";
+import { exportEnaReportPdf, formatDateRangeLabel } from "../lib/exportEnaReportPdf";
 
 const FUEL_DRIVER_SEP = "\x1f";
 
@@ -92,22 +101,6 @@ function parseNumeric(value: string) {
   return match ? Number(match[0]) : 0;
 }
 
-function parseWialonDateTime(value: string) {
-  const raw = String(value ?? "").trim();
-  if (!raw || raw === "-----" || raw === "—") return Number.NEGATIVE_INFINITY;
-  const match = raw.match(/^(\d{2})\.(\d{2})\.(\d{4})(?:\s+(\d{2}):(\d{2})(?::(\d{2}))?)?/);
-  if (!match) return Number.NEGATIVE_INFINITY;
-  const dd = Number(match[1]);
-  const mm = Number(match[2]);
-  const yyyy = Number(match[3]);
-  const hh = Number(match[4] ?? 0);
-  const min = Number(match[5] ?? 0);
-  const ss = Number(match[6] ?? 0);
-  const dt = new Date(yyyy, mm - 1, dd, hh, min, ss);
-  const ms = dt.getTime();
-  return Number.isFinite(ms) ? ms : Number.NEGATIVE_INFINITY;
-}
-
 function downloadTableXlsx(baseName: string, headers: string[], rows: Array<Array<ExportCell>>, sheetName: string) {
   // Location column is index 3 for both fuel sheets (no "#" column).
   const sheet = buildSheetWithOptionalHyperlinks(headers, rows, [3]);
@@ -137,6 +130,15 @@ function downloadFuelWorkbook(
   XLSX.writeFile(book, `fuel_operations_${makeTimestamp()}.xlsx`);
 }
 
+type FuelSortKey =
+  | "vehicle"
+  | "driver"
+  | "date"
+  | "location"
+  | "initialFuel"
+  | "finalFuel"
+  | "amount";
+
 function FuelFillingsTable({
   rows,
   page,
@@ -147,6 +149,8 @@ function FuelFillingsTable({
   formatDriverCell,
   onPrev,
   onNext,
+  sort,
+  onToggleSort,
 }: {
   rows: FuelRecord[];
   page: number;
@@ -157,6 +161,8 @@ function FuelFillingsTable({
   formatDriverCell: (vehicle: string, rawDriver: string) => string;
   onPrev: () => void;
   onNext: () => void;
+  sort: SortState<FuelSortKey>;
+  onToggleSort: (key: FuelSortKey) => void;
 }) {
   const totalPages = Math.max(1, Math.ceil(totalRows / MAX_FUEL_ROWS));
   const currentPage = page + 1;
@@ -181,18 +187,14 @@ function FuelFillingsTable({
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: ".8rem", minWidth: "1250px" }}>
           <thead>
             <tr style={{ background: "var(--surface2)", borderBottom: "1px solid var(--border2)" }}>
-              {[
-                "#",
-                "Vehicle",
-                "Driver",
-                "Filling date",
-                "Location",
-                "Initial fuel level",
-                "Final fuel level",
-                "Fuel Filled",
-              ].map((h) => (
-                <th key={h} style={thStyle}>{h}</th>
-              ))}
+              <th style={thStyle}>#</th>
+              <SortHeader sortKey="vehicle" label="Vehicle" sort={sort} onToggle={onToggleSort} thStyle={thStyle} />
+              <SortHeader sortKey="driver" label="Driver" sort={sort} onToggle={onToggleSort} thStyle={thStyle} />
+              <SortHeader sortKey="date" label="Filling date" sort={sort} onToggle={onToggleSort} thStyle={thStyle} />
+              <SortHeader sortKey="location" label="Location" sort={sort} onToggle={onToggleSort} thStyle={thStyle} />
+              <SortHeader sortKey="initialFuel" label="Initial fuel level" sort={sort} onToggle={onToggleSort} thStyle={thStyle} />
+              <SortHeader sortKey="finalFuel" label="Final fuel level" sort={sort} onToggle={onToggleSort} thStyle={thStyle} />
+              <SortHeader sortKey="amount" label="Fuel Filled" sort={sort} onToggle={onToggleSort} thStyle={thStyle} />
             </tr>
           </thead>
           <tbody>
@@ -309,6 +311,8 @@ function FuelDrainsTable({
   formatDriverCell,
   onPrev,
   onNext,
+  sort,
+  onToggleSort,
 }: {
   rows: FuelRecord[];
   page: number;
@@ -319,6 +323,8 @@ function FuelDrainsTable({
   formatDriverCell: (vehicle: string, rawDriver: string) => string;
   onPrev: () => void;
   onNext: () => void;
+  sort: SortState<FuelSortKey>;
+  onToggleSort: (key: FuelSortKey) => void;
 }) {
   const totalPages = Math.max(1, Math.ceil(totalRows / MAX_FUEL_ROWS));
   const currentPage = page + 1;
@@ -343,9 +349,14 @@ function FuelDrainsTable({
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: ".8rem", minWidth: "1200px" }}>
           <thead>
             <tr style={{ background: "var(--surface2)", borderBottom: "1px solid var(--border2)" }}>
-              {["#", "Vehicle", "Driver", "Drain time", "Location", "Initial fuel level", "Final fuel level", "Fuel Drained"].map((h) => (
-                <th key={h} style={thStyle}>{h}</th>
-              ))}
+              <th style={thStyle}>#</th>
+              <SortHeader sortKey="vehicle" label="Vehicle" sort={sort} onToggle={onToggleSort} thStyle={thStyle} />
+              <SortHeader sortKey="driver" label="Driver" sort={sort} onToggle={onToggleSort} thStyle={thStyle} />
+              <SortHeader sortKey="date" label="Drain time" sort={sort} onToggle={onToggleSort} thStyle={thStyle} />
+              <SortHeader sortKey="location" label="Location" sort={sort} onToggle={onToggleSort} thStyle={thStyle} />
+              <SortHeader sortKey="initialFuel" label="Initial fuel level" sort={sort} onToggle={onToggleSort} thStyle={thStyle} />
+              <SortHeader sortKey="finalFuel" label="Final fuel level" sort={sort} onToggle={onToggleSort} thStyle={thStyle} />
+              <SortHeader sortKey="amount" label="Fuel Drained" sort={sort} onToggle={onToggleSort} thStyle={thStyle} />
             </tr>
           </thead>
           <tbody>
@@ -550,32 +561,87 @@ export default function Fuel({ data, loading, error, startDate, endDate, onStart
       || (finalFuel && finalFuel !== "-----");
   };
 
-  const filteredFillings = useMemo(
-    () => fuelFillings
-      .filter((r) => selectedVehicle === "ALL" || r.vehicle === selectedVehicle)
-      .filter(rowMatchesDriverFilter)
-      .filter(hasMeaningfulFillingValues)
-      .slice()
-      .sort((a, b) => {
-        const aTs = parseWialonDateTime(getValue(a, ["Filling or charge time"]));
-        const bTs = parseWialonDateTime(getValue(b, ["Filling or charge time"]));
-        return bTs - aTs;
-      }),
+  const baseFillings = useMemo(
+    () =>
+      fuelFillings
+        .filter((r) => selectedVehicle === "ALL" || r.vehicle === selectedVehicle)
+        .filter(rowMatchesDriverFilter)
+        .filter(hasMeaningfulFillingValues),
     [fuelFillings, selectedVehicle, rowMatchesDriverFilter],
   );
 
-  const filteredDrains = useMemo(
-    () => fuelDrains
-      .filter((r) => selectedVehicle === "ALL" || r.vehicle === selectedVehicle)
-      .filter(rowMatchesDriverFilter)
-      .filter(hasMeaningfulDrainValues)
-      .slice()
-      .sort((a, b) => {
-        const aTs = parseWialonDateTime(getValue(a, ["Drain time"]));
-        const bTs = parseWialonDateTime(getValue(b, ["Drain time"]));
-        return bTs - aTs;
-      }),
+  const baseDrains = useMemo(
+    () =>
+      fuelDrains
+        .filter((r) => selectedVehicle === "ALL" || r.vehicle === selectedVehicle)
+        .filter(rowMatchesDriverFilter)
+        .filter(hasMeaningfulDrainValues),
     [fuelDrains, selectedVehicle, rowMatchesDriverFilter],
+  );
+
+  const { sort: fillingsSort, toggleSort: toggleFillingsSort } = useTableSort<FuelSortKey>({
+    key: "date",
+    dir: "desc",
+  });
+  const { sort: drainsSort, toggleSort: toggleDrainsSort } = useTableSort<FuelSortKey>({
+    key: "date",
+    dir: "desc",
+  });
+
+  const filteredFillings = useMemo(
+    () =>
+      sortRowsBy(baseFillings, fillingsSort, (row, key) => {
+        switch (key) {
+          case "vehicle":
+            return row.vehicle || row.grouping;
+          case "driver":
+            return formatDriverCell(
+              row.vehicle || row.grouping || "",
+              getValue(row, ["Driver"]) || row.driver || "",
+            );
+          case "date":
+            return parseDateTimeMs(getValue(row, ["Filling or charge time"]));
+          case "location":
+            return row.location;
+          case "initialFuel":
+            return parseFirstNumber(getValue(row, ["Initial fuel level"]));
+          case "finalFuel":
+            return parseFirstNumber(getValue(row, ["Final fuel level"]));
+          case "amount":
+            return parseFirstNumber(getValue(row, ["Filled"]));
+          default:
+            return 0;
+        }
+      }),
+    [baseFillings, fillingsSort, formatDriverCell],
+  );
+
+  const filteredDrains = useMemo(
+    () =>
+      sortRowsBy(baseDrains, drainsSort, (row, key) => {
+        switch (key) {
+          case "vehicle":
+            return row.vehicle || row.grouping;
+          case "driver":
+            return formatDriverCell(
+              row.vehicle || row.grouping || "",
+              getValue(row, ["Driver"]) || row.driver || "",
+            );
+          case "date":
+            return parseDateTimeMs(getValue(row, ["Drain time"]));
+          case "location":
+            return getValue(row, ["Initial location"]) || row.location;
+          case "initialFuel":
+            return parseFirstNumber(getValue(row, ["Initial fuel level"]));
+          case "finalFuel":
+            return parseFirstNumber(getValue(row, ["Final fuel level"]));
+          case "amount":
+            return parseFirstNumber(getValue(row, ["Drained"]));
+          default:
+            return 0;
+        }
+      }),
+    [baseDrains, drainsSort, formatDriverCell],
   );
 
   const totalFilledLitres = useMemo(
@@ -635,6 +701,93 @@ export default function Fuel({ data, loading, error, startDate, endDate, onStart
         getValue(row, ["Drained"]) || "—",
       ]),
     );
+
+  const downloadFuelReportPdf = () => {
+    const scopeBits = [
+      selectedVehicle === "ALL" ? "All Vehicles" : selectedVehicle,
+      selectedDriver === "ALL"
+        ? "All Drivers"
+        : (driverSelectOptions.find((o) => o.value === selectedDriver)?.label ?? "Selected Driver"),
+    ];
+
+    const fillingsHead = [[
+      "#",
+      "Vehicle",
+      "Driver",
+      "Filling Date",
+      "Location",
+      "Initial Fuel (L)",
+      "Final Fuel (L)",
+      "Filled (L)",
+    ]];
+    const fillingsBody = filteredFillings.map((row, idx) => [
+      idx + 1,
+      row.vehicle || row.grouping || "—",
+      formatDriverCell(row.vehicle || row.grouping || "", getValue(row, ["Driver"]) || row.driver || ""),
+      getValue(row, ["Filling or charge time"]) || "—",
+      row.location || "—",
+      getValue(row, ["Initial fuel level"]) || "—",
+      getValue(row, ["Final fuel level"]) || "—",
+      getValue(row, ["Filled"]) || "—",
+    ]);
+
+    const drainsHead = [[
+      "#",
+      "Vehicle",
+      "Driver",
+      "Drain Time",
+      "Initial Location",
+      "Initial Fuel (L)",
+      "Final Fuel (L)",
+      "Drained (L)",
+    ]];
+    const drainsBody = filteredDrains.map((row, idx) => [
+      idx + 1,
+      row.vehicle || row.grouping || "—",
+      formatDriverCell(row.vehicle || row.grouping || "", getValue(row, ["Driver"]) || row.driver || ""),
+      getValue(row, ["Drain time"]) || "—",
+      getValue(row, ["Initial location"]) || "—",
+      getValue(row, ["Initial fuel level"]) || "—",
+      getValue(row, ["Final fuel level"]) || "—",
+      getValue(row, ["Drained"]) || "—",
+    ]);
+
+    void exportEnaReportPdf({
+      title: "Ena Fleet Fuel Report",
+      subtitle: formatDateRangeLabel(startDate, endDate),
+      summary: [
+        {
+          label: "Total Refills",
+          value: `${filteredFillings.length.toLocaleString()} fills · ${totalFilledLitres.toFixed(2)} L`,
+          accent: "#15803d",
+        },
+        {
+          label: "Total Drains",
+          value: `${filteredDrains.length.toLocaleString()} drains · ${totalDrainedLitres.toFixed(2)} L`,
+          accent: "#b91c1c",
+        },
+        {
+          label: "Net Fuel",
+          value: `${(totalFilledLitres - totalDrainedLitres).toFixed(2)} L`,
+          accent: totalFilledLitres - totalDrainedLitres >= 0 ? "#15803d" : "#b91c1c",
+        },
+        {
+          label: "Scope",
+          value: scopeBits.join(" · "),
+        },
+      ],
+      narrative:
+        filteredFillings.length === 0 && filteredDrains.length === 0
+          ? "No fuel fillings or drains were recorded for this period and scope."
+          : `Summary of fuel fillings and drains for the selected period. ${filteredFillings.length} filling event${filteredFillings.length === 1 ? "" : "s"} totalling ${totalFilledLitres.toFixed(2)} L, and ${filteredDrains.length} drain event${filteredDrains.length === 1 ? "" : "s"} totalling ${totalDrainedLitres.toFixed(2)} L.`,
+      sections: [
+        { heading: "Fuel Fillings", head: fillingsHead, body: fillingsBody },
+        { heading: "Fuel Drains", head: drainsHead, body: drainsBody },
+      ],
+      fileName: `ena_fleet_fuel_report_${makeTimestamp()}.pdf`,
+      landscape: true,
+    });
+  };
 
   return (
     <div style={{ width: "100%", maxWidth: "100%", minWidth: 0, overflowX: "auto", overflowY: "visible" }}>
@@ -730,6 +883,22 @@ export default function Fuel({ data, loading, error, startDate, endDate, onStart
         </select>
 
         <button
+          type="button"
+          onClick={downloadFuelReportPdf}
+          style={{
+            padding: "6px 10px",
+            fontSize: ".75rem",
+            borderRadius: "var(--radius-sm)",
+            border: "1px solid rgba(220,38,38,0.35)",
+            background: "rgba(220,38,38,0.1)",
+            color: "#b91c1c",
+            fontWeight: 700,
+            cursor: "pointer",
+          }}
+        >
+          Download PDF
+        </button>
+        <button
           onClick={downloadAllFuelSheets}
           style={{
             padding: "6px 10px",
@@ -742,7 +911,7 @@ export default function Fuel({ data, loading, error, startDate, endDate, onStart
             cursor: "pointer",
           }}
         >
-          Download All
+          Download All XLSX
         </button>
       </div>
 
@@ -754,6 +923,8 @@ export default function Fuel({ data, loading, error, startDate, endDate, onStart
           allRows={filteredFillings}
           totalFilled={totalFilledLitres}
           formatDriverCell={formatDriverCell}
+          sort={fillingsSort}
+          onToggleSort={toggleFillingsSort}
           onDownloadXlsx={() =>
             downloadTableXlsx(
               "fuel_fillings",
@@ -784,6 +955,8 @@ export default function Fuel({ data, loading, error, startDate, endDate, onStart
           allRows={filteredDrains}
           totalDrained={totalDrainedLitres}
           formatDriverCell={formatDriverCell}
+          sort={drainsSort}
+          onToggleSort={toggleDrainsSort}
           onDownloadXlsx={() =>
             downloadTableXlsx(
               "fuel_drains",

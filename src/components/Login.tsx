@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
 
 interface LoginProps {
   onLogin: () => Promise<void>;
@@ -43,19 +44,43 @@ export default function Login({ onLogin }: LoginProps) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (username === "Ena-Coach" && password === "Ena-Coach@2008") {
-      setError("");
-      setLoading(true);
-      try {
-        await onLogin();
-      } catch (err) {
-        const message = err instanceof Error ? err.message : "Failed to load report data.";
-        setError(message);
-      } finally {
-        setLoading(false);
+    setError("");
+    setLoading(true);
+
+    try {
+      const authResponse = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        cache: "no-store",
+        body: JSON.stringify({
+          username,
+          password,
+        }),
+      });
+
+      if (!authResponse.ok) {
+        let message = "Invalid username or password";
+        try {
+          const payload = (await authResponse.json()) as { error?: string };
+          if (payload?.error) {
+            message = payload.error;
+          }
+        } catch {
+          message = authResponse.status === 401
+            ? "Invalid username or password"
+            : "Sign-in failed.";
+        }
+        throw new Error(message);
       }
-    } else {
-      setError("Invalid username or password");
+
+      await onLogin();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to load report data.";
+      setError(message);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -242,7 +267,7 @@ export default function Login({ onLogin }: LoginProps) {
               >
                 Track every Ena Coach bus across Kenya with{" "}
                 <span style={{ color: "#fde68a", fontWeight: 600 }}>second-by-second telemetry</span>,
-                driver behavior scores, and trip-level analytics — in one secure operations workspace.
+                driver behavior scores, and trip-level analytics in one secure operations workspace.
               </p>
 
               {/* Feature tag pills */}
@@ -471,7 +496,7 @@ export default function Login({ onLogin }: LoginProps) {
                     marginBottom: "6px",
                   }}
                 >
-                  Username
+                  Username or email
                 </label>
                 <input
                   type="text"
@@ -501,7 +526,7 @@ export default function Login({ onLogin }: LoginProps) {
                     e.target.style.borderColor = "var(--border)";
                     e.target.style.boxShadow = "none";
                   }}
-                  placeholder="Enter username"
+                  placeholder="e.g. Ena-Coach or your work email"
                 />
               </div>
 
@@ -735,9 +760,29 @@ export default function Login({ onLogin }: LoginProps) {
           <p
             style={{
               textAlign: "center",
+              fontSize: ".74rem",
+              color: "var(--text2)",
+              marginTop: "10px",
+              fontWeight: 600,
+            }}
+          >
+            <Link
+              href="/install"
+              style={{
+                color: "var(--blue)",
+                textDecoration: "none",
+              }}
+            >
+              Install app on your phone
+            </Link>
+          </p>
+
+          <p
+            style={{
+              textAlign: "center",
               fontSize: ".7rem",
               color: "var(--text3)",
-              marginTop: "10px",
+              marginTop: "6px",
               fontWeight: 500,
             }}
           >

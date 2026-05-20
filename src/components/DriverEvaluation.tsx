@@ -19,7 +19,8 @@ import { useMediaQuery } from "../lib/useMediaQuery";
 import { LAYOUT_NARROW_QUERY } from "../lib/breakpoints";
 import { VIOLATION_TYPES, type Driver, type SharedTabProps } from "../lib/data";
 import { buildVehicleMissingOrdinalMap, formatDriverDisplay, isMissingDriver } from "../lib/driverDisplay";
-import { downloadPdfTable } from "../lib/exportPdfTable";
+import { exportEnaReportPdf, formatDateRangeLabel } from "../lib/exportEnaReportPdf";
+import { SortHeader, sortRowsBy, useTableSort } from "../lib/sortableTable";
 import * as XLSX from "xlsx";
 
 function durationToSeconds(value?: string) {
@@ -310,24 +311,60 @@ export default function DriverEvaluation({
     return rows.sort((a, b) => b.score - a.score || b.distanceKm - a.distanceKm);
   }, [driversInScope, driverViolations, missingOrdinalByVehicle, filteredViolations]);
 
+  type ScoreSortKey =
+    | "driver"
+    | "vehicle"
+    | "distance"
+    | "score"
+    | "grade"
+    | "greenBand"
+    | "totalViolations"
+    | `viol:${number}`;
+  const { sort: scoreSort, toggleSort: toggleScoreSort } = useTableSort<ScoreSortKey>({
+    key: "score",
+    dir: "desc",
+  });
+  const sortedScoreRows = useMemo(
+    () =>
+      sortRowsBy(driverScores, scoreSort, (row, key) => {
+        if (key === "driver") return row.driverLabel;
+        if (key === "vehicle") return row.vehicle;
+        if (key === "distance") return Number(row.distanceKm ?? 0);
+        if (key === "score") return Number(row.score ?? 0);
+        if (key === "grade") return row.grade;
+        if (key === "greenBand") return Number(row.greenBandPct ?? 0);
+        if (key === "totalViolations") return Number(row.totalCount ?? 0);
+        if (key.startsWith("viol:")) {
+          const idx = Number(key.slice("viol:".length));
+          const vt = VIOLATION_TYPES[idx];
+          if (!vt) return 0;
+          // Sort by the per-100km rate so columns are comparable across drivers
+          // with different total distances.
+          return Number(row.rates[vt] ?? 0);
+        }
+        return 0;
+      }),
+    [driverScores, scoreSort],
+  );
+
   const pageSize = 10;
-  const totalPages = Math.max(1, Math.ceil(driverScores.length / pageSize));
-  const pagedScoreRows = driverScores.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const totalPages = Math.max(1, Math.ceil(sortedScoreRows.length / pageSize));
+  const pagedScoreRows = sortedScoreRows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   const downloadScoresPdf = () => {
-    const head = [
-      [
-        "Driver",
-        "Vehicle",
-        "Distance (km)",
-        "Score",
-        "Grade",
-        "Green Band Driving",
-        "Total Violations",
-        ...VIOLATION_TYPES.map((v) => `${v} (#/100km)`),
-      ],
-    ];
-    const body = driverScores.map((r) => [
+    const head = [[
+      "#",
+      "Driver",
+      "Vehicle",
+      "Distance (km)",
+      "Score",
+      "Grade",
+      "Green Band Driving",
+      "Total Violations",
+      ...VIOLATION_TYPES.map((v) => `${v} (#/100km)`),
+    ]];
+    const body = sortedScoreRows.map((r, idx) => [
+      idx + 1,
       r.driverLabel,
       r.vehicle,
       Number(r.distanceKm ?? 0).toFixed(2),
@@ -339,11 +376,30 @@ export default function DriverEvaluation({
         (vt) => `${r.counts[vt] ?? 0} (${(r.rates[vt] ?? 0).toFixed(2)})`,
       ),
     ]);
-    downloadPdfTable({
-      title: "Driver scoring",
-      head,
-      body,
-      fileName: `driver_scoring_${new Date().toISOString().slice(0, 10)}.pdf`,
+
+    const totalDrivers = sortedScoreRows.length;
+    const totalDistance = sortedScoreRows.reduce((sum, r) => sum + Number(r.distanceKm ?? 0), 0);
+    const totalViolations = sortedScoreRows.reduce((sum, r) => sum + Number(r.totalCount ?? 0), 0);
+    const avgScore = totalDrivers > 0
+      ? sortedScoreRows.reduce((sum, r) => sum + Number(r.score ?? 0), 0) / totalDrivers
+      : 0;
+    const goodCount = sortedScoreRows.filter((r) => r.grade === "Good").length;
+
+    void exportEnaReportPdf({
+      title: "Ena Fleet Driver Scoring Report",
+      subtitle: formatDateRangeLabel(startDate, endDate),
+      summary: [
+        { label: "Drivers", value: totalDrivers.toLocaleString() },
+        { label: "Total Distance", value: `${totalDistance.toFixed(0)} km` },
+        { label: "Total Violations", value: totalViolations.toLocaleString(), accent: totalViolations > 0 ? "#b91c1c" : "#15803d" },
+        { label: "Avg Score · Good", value: `${avgScore.toFixed(0)} · ${goodCount}/${totalDrivers}`, accent: avgScore >= 60 ? "#15803d" : "#b91c1c" },
+      ],
+      narrative:
+        totalDrivers === 0
+          ? "No driver activity recorded for this period."
+          : `Scoring computed from green-band driving share and per-100km violation rates. ${goodCount} of ${totalDrivers} driver${totalDrivers === 1 ? "" : "s"} scored "Good".`,
+      sections: [{ heading: "Driver Scoring", head, body }],
+      fileName: `ena_fleet_driver_scoring_${new Date().toISOString().slice(0, 10)}.pdf`,
       landscape: true,
     });
   };
@@ -714,19 +770,40 @@ export default function DriverEvaluation({
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: ".8rem", minWidth: 1200 }}>
             <thead>
               <tr style={{ background: "var(--surface2)", borderBottom: "1px solid var(--border2)" }}>
-                {[
-                  "#",
-                  "Driver",
-                  "Vehicle",
-                  "Distance (km)",
-                  "Score",
-                  "Grade",
-                  "Green Band Driving",
-                  "Total Violations",
-                  ...VIOLATION_TYPES.map((v) => `${v} (#/100km)`),
-                ].map((h) => (
-                  <th key={h} style={{ padding: "10px 12px", textAlign: h.includes("(km)") || h.includes("Score") || h.includes("Total") || h.includes("#/100") ? "right" : "left", fontSize: ".68rem", fontWeight: 800, color: "#000000", textTransform: "uppercase", letterSpacing: ".06em", whiteSpace: "nowrap" }}>{h}</th>
-                ))}
+                {(() => {
+                  const baseTh: React.CSSProperties = {
+                    padding: "10px 12px",
+                    fontSize: ".68rem",
+                    fontWeight: 800,
+                    color: "#000000",
+                    textTransform: "uppercase",
+                    letterSpacing: ".06em",
+                    whiteSpace: "nowrap",
+                  };
+                  return (
+                    <>
+                      <th style={{ ...baseTh, textAlign: "left" }}>#</th>
+                      <SortHeader sortKey="driver" label="Driver" sort={scoreSort} onToggle={toggleScoreSort} thStyle={baseTh} />
+                      <SortHeader sortKey="vehicle" label="Vehicle" sort={scoreSort} onToggle={toggleScoreSort} thStyle={baseTh} />
+                      <SortHeader sortKey="distance" label="Distance (km)" sort={scoreSort} onToggle={toggleScoreSort} align="right" thStyle={baseTh} />
+                      <SortHeader sortKey="score" label="Score" sort={scoreSort} onToggle={toggleScoreSort} align="right" thStyle={baseTh} />
+                      <SortHeader sortKey="grade" label="Grade" sort={scoreSort} onToggle={toggleScoreSort} thStyle={baseTh} />
+                      <SortHeader sortKey="greenBand" label="Green Band Driving" sort={scoreSort} onToggle={toggleScoreSort} align="right" thStyle={baseTh} />
+                      <SortHeader sortKey="totalViolations" label="Total Violations" sort={scoreSort} onToggle={toggleScoreSort} align="right" thStyle={baseTh} />
+                      {VIOLATION_TYPES.map((v, idx) => (
+                        <SortHeader
+                          key={v}
+                          sortKey={`viol:${idx}` as ScoreSortKey}
+                          label={`${v} (#/100km)`}
+                          sort={scoreSort}
+                          onToggle={toggleScoreSort}
+                          align="right"
+                          thStyle={baseTh}
+                        />
+                      ))}
+                    </>
+                  );
+                })()}
               </tr>
             </thead>
             <tbody>

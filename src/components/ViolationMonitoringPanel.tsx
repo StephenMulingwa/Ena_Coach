@@ -10,6 +10,16 @@ import {
 } from "../lib/data";
 import { buildVehicleMissingOrdinalMap, formatDriverDisplay, isMissingDriver } from "../lib/driverDisplay";
 import { exportAllViolationsWorkbook, exportMonitoringPdf, toDate } from "../lib/violationReportsExport";
+import {
+  SortHeader,
+  parseDateTimeMs,
+  parseDurationSeconds,
+  parseFirstNumber,
+  sortRowsBy,
+  useTableSort,
+} from "../lib/sortableTable";
+import { useMediaQuery } from "../lib/useMediaQuery";
+import { LAYOUT_NARROW_QUERY } from "../lib/breakpoints";
 
 const VIOLATIONS_PAGE_SIZE = 10;
 
@@ -20,12 +30,22 @@ export default function ViolationMonitoringPanel({
 }: Pick<SharedTabProps, "data" | "startDate" | "endDate">) {
   const [activeViolation, setActiveViolation] = useState<ViolationType>("Harsh Cornering");
   const [driverFilterId, setDriverFilterId] = useState<string>("ALL");
+  const [vehicleFilter, setVehicleFilter] = useState<string>("ALL");
   const [currentPage, setCurrentPage] = useState(1);
+  const isNarrow = useMediaQuery(LAYOUT_NARROW_QUERY);
 
   const violations = useMemo(() => data?.violations ?? [], [data?.violations]);
   const drivers = useMemo(() => data?.drivers ?? [], [data?.drivers]);
   const fuelFillings = useMemo(() => data?.fuelFillings ?? [], [data?.fuelFillings]);
   const fuelDrains = useMemo(() => data?.fuelDrains ?? [], [data?.fuelDrains]);
+
+  const vehicleOptions = useMemo(
+    () =>
+      [...new Set(violations.map((v) => String(v.vehicle ?? "").trim()).filter(Boolean))].sort((a, b) =>
+        a.localeCompare(b),
+      ),
+    [violations],
+  );
 
   const extraMissingVehicles = useMemo(
     () => drivers.filter((d) => isMissingDriver(d.name)).map((d) => d.vehicle),
@@ -57,9 +77,18 @@ export default function ViolationMonitoringPanel({
     [],
   );
 
+  const vehicleMatches = useCallback(
+    (r: ViolationRecord) =>
+      vehicleFilter === "ALL" || String(r.vehicle ?? "").trim() === vehicleFilter,
+    [vehicleFilter],
+  );
+
   const driverScoped = useMemo(
-    () => violations.filter((r) => violationMatchesDriverFilter(r, driverFilterId, drivers)),
-    [violations, driverFilterId, drivers, violationMatchesDriverFilter],
+    () =>
+      violations
+        .filter((r) => violationMatchesDriverFilter(r, driverFilterId, drivers))
+        .filter(vehicleMatches),
+    [violations, driverFilterId, drivers, violationMatchesDriverFilter, vehicleMatches],
   );
 
   const dateFiltered = useMemo(
@@ -67,15 +96,75 @@ export default function ViolationMonitoringPanel({
     [violations, activeViolation],
   );
   const filtered = useMemo(
-    () => dateFiltered.filter((r) => violationMatchesDriverFilter(r, driverFilterId, drivers)),
-    [dateFiltered, driverFilterId, drivers, violationMatchesDriverFilter],
-  );
-  const ordered = useMemo(
     () =>
-      filtered
-        .slice()
-        .sort((a, b) => toDate(b.beginning).getTime() - toDate(a.beginning).getTime()),
-    [filtered],
+      dateFiltered
+        .filter((r) => violationMatchesDriverFilter(r, driverFilterId, drivers))
+        .filter(vehicleMatches),
+    [dateFiltered, driverFilterId, drivers, violationMatchesDriverFilter, vehicleMatches],
+  );
+  type ViolationSortKey =
+    | "driver"
+    | "vehicle"
+    | "beginning"
+    | "initialLocation"
+    | "end"
+    | "finalLocation"
+    | "avgSpeed"
+    | "maxSpeed"
+    | "duration"
+    | "mileage";
+  // Default to newest events first, matching the previous behavior.
+  const { sort: violationSort, toggleSort: toggleViolationSort } = useTableSort<ViolationSortKey>({
+    key: "beginning",
+    dir: "desc",
+  });
+
+  // Reused by both the on-screen `ordered` rows and the bulk per-type rows
+  // gathered for the PDF / XLSX downloads, so every section is ordered the
+  // same way as the table the user is looking at.
+  const sortViolationRows = useCallback(
+    (rows: ViolationRecord[]) =>
+      sortRowsBy(rows, violationSort, (row, key) => {
+        switch (key) {
+          case "driver":
+            return formatDriverCell(row.vehicle, row.driver);
+          case "vehicle":
+            return row.vehicle;
+          case "beginning":
+            return parseDateTimeMs(row.beginning) || toDate(row.beginning).getTime();
+          case "end":
+            return parseDateTimeMs(row.end) || toDate(row.end).getTime();
+          case "initialLocation":
+            return row.initialLocation;
+          case "finalLocation":
+            return row.finalLocation;
+          case "avgSpeed":
+            return parseFirstNumber(row.avgSpeed);
+          case "maxSpeed":
+            return parseFirstNumber(row.maxSpeed);
+          case "duration":
+            return parseDurationSeconds(row.duration);
+          case "mileage":
+            return parseFirstNumber(row.mileage);
+          default:
+            return 0;
+        }
+      }),
+    [violationSort, formatDriverCell],
+  );
+
+  const ordered = useMemo(() => sortViolationRows(filtered), [filtered, sortViolationRows]);
+
+  /** All violation types with their (vehicle + driver scoped) rows, used by the
+   *  bulk PDF and XLSX downloads so each export contains a section / sheet per
+   *  type regardless of which one is currently selected on screen. */
+  const violationTypesForDownload = useMemo(
+    () =>
+      VIOLATION_TYPES.map((vt) => ({
+        type: vt,
+        rows: sortViolationRows(driverScoped.filter((r) => r.violation === vt)),
+      })),
+    [driverScoped, sortViolationRows],
   );
   const totalPages = Math.max(1, Math.ceil(filtered.length / VIOLATIONS_PAGE_SIZE));
   const pagedRows = ordered.slice(
@@ -86,7 +175,7 @@ export default function ViolationMonitoringPanel({
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- violations table resets to page 1 when scope changes
     setCurrentPage(1);
-  }, [activeViolation, driverFilterId, startDate, endDate]);
+  }, [activeViolation, driverFilterId, vehicleFilter, startDate, endDate]);
 
   const kpiCards = useMemo(
     () =>
@@ -120,17 +209,14 @@ export default function ViolationMonitoringPanel({
 
       <div style={{ display: "flex", alignItems: "center", gap: "16px", marginBottom: "12px", flexWrap: "wrap" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <span style={{ fontSize: ".66rem", color: "#000000", fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em" }}>Violation Type</span>
+          <span style={{ fontSize: ".66rem", color: "#000000", fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em" }}>Vehicle</span>
           <select
-            value={activeViolation}
-            onChange={(e) => {
-              setActiveViolation(e.target.value as ViolationType);
-              setDriverFilterId("ALL");
-            }}
+            value={vehicleFilter}
+            onChange={(e) => setVehicleFilter(e.target.value)}
             style={{
               padding: "6px 10px",
-              background: "#fffdf3",
-              border: "2px solid rgba(245,179,0,0.45)",
+              background: "var(--surface)",
+              border: "1px solid var(--border)",
               borderRadius: "var(--radius-sm)",
               color: "var(--text)",
               fontSize: ".76rem",
@@ -141,8 +227,9 @@ export default function ViolationMonitoringPanel({
               minWidth: "170px",
             }}
           >
-            {VIOLATION_TYPES.map((vt) => (
-              <option key={vt} value={vt}>{vt}</option>
+            <option value="ALL">All Vehicles</option>
+            {vehicleOptions.map((v) => (
+              <option key={v} value={v}>{v}</option>
             ))}
           </select>
         </div>
@@ -183,13 +270,23 @@ export default function ViolationMonitoringPanel({
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <button
             type="button"
-            onClick={() => exportMonitoringPdf(ordered, formatDriverCell)}
+            onClick={() =>
+              exportMonitoringPdf(violationTypesForDownload, formatDriverCell, {
+                startDate,
+                endDate,
+                vehicleScope: vehicleFilter === "ALL" ? "All Vehicles" : vehicleFilter,
+                driverScope:
+                  driverFilterId === "ALL"
+                    ? "All Drivers"
+                    : (drivers.find((d) => d.id === driverFilterId)?.name ?? "Selected Driver"),
+              })
+            }
             style={{
               padding: "6px 10px",
               borderRadius: "var(--radius-sm)",
-              border: "1px solid rgba(47,111,237,0.35)",
-              background: "rgba(47,111,237,0.1)",
-              color: "var(--blue)",
+              border: "1px solid rgba(220,38,38,0.35)",
+              background: "rgba(220,38,38,0.1)",
+              color: "#b91c1c",
               fontWeight: 700,
               fontSize: ".76rem",
               cursor: "pointer",
@@ -199,7 +296,7 @@ export default function ViolationMonitoringPanel({
           </button>
           <button
             type="button"
-            onClick={() => exportAllViolationsWorkbook(startDate, endDate, violations, formatDriverCell)}
+            onClick={() => exportAllViolationsWorkbook(violationTypesForDownload, formatDriverCell)}
             style={{
               padding: "6px 10px",
               borderRadius: "var(--radius-sm)",
@@ -216,18 +313,81 @@ export default function ViolationMonitoringPanel({
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: "14px", marginBottom: "14px" }}>
-        {kpiCards.map((kpi) => (
-          <div key={kpi.type} style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius)", boxShadow: "var(--shadow)", padding: "18px 18px", position: "relative", overflow: "hidden" }}>
-            <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: `linear-gradient(90deg, ${kpi.color}, transparent)` }} />
-            <div style={{ fontFamily: "var(--font-body)", fontWeight: 800, fontSize: "1.65rem", color: "var(--text)", lineHeight: 1 }}>
-              {kpi.count.toLocaleString()}
-            </div>
-            <div style={{ marginTop: 8, fontSize: ".72rem", color: "#000000", textTransform: "uppercase", letterSpacing: ".06em", fontWeight: 700 }}>
-              {kpi.type}
-            </div>
-          </div>
-        ))}
+      <div
+        className="violation-kpi-row"
+        style={{
+          display: "grid",
+          gridTemplateColumns: isNarrow
+            ? "repeat(2, minmax(0, 1fr))"
+            : "repeat(auto-fit, minmax(210px, 1fr))",
+          gap: isNarrow ? 10 : 14,
+          marginBottom: 14,
+        }}
+      >
+        {kpiCards.map((kpi) => {
+          const isActive = kpi.type === activeViolation;
+          return (
+            <button
+              key={kpi.type}
+              type="button"
+              onClick={() => setActiveViolation(kpi.type)}
+              aria-pressed={isActive}
+              style={{
+                appearance: "none",
+                textAlign: "left",
+                cursor: "pointer",
+                background: "var(--surface)",
+                border: isActive
+                  ? `2px solid ${kpi.color}`
+                  : "1px solid var(--border)",
+                borderRadius: "var(--radius)",
+                boxShadow: isActive
+                  ? `0 0 0 3px ${kpi.color}22, var(--shadow)`
+                  : "var(--shadow)",
+                padding: isNarrow ? "12px 14px" : "18px 18px",
+                position: "relative",
+                overflow: "hidden",
+                transition: "transform .15s ease, box-shadow .15s ease, border-color .15s ease",
+                transform: isActive ? "translateY(-1px)" : "none",
+                minWidth: 0,
+              }}
+            >
+              <div
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  height: 3,
+                  background: `linear-gradient(90deg, ${kpi.color}, transparent)`,
+                }}
+              />
+              <div
+                style={{
+                  fontFamily: "var(--font-body)",
+                  fontWeight: 800,
+                  fontSize: isNarrow ? "1.3rem" : "1.65rem",
+                  color: "var(--text)",
+                  lineHeight: 1,
+                }}
+              >
+                {kpi.count.toLocaleString()}
+              </div>
+              <div
+                style={{
+                  marginTop: 8,
+                  fontSize: isNarrow ? ".64rem" : ".72rem",
+                  color: "#000000",
+                  textTransform: "uppercase",
+                  letterSpacing: ".06em",
+                  fontWeight: 700,
+                }}
+              >
+                {kpi.type}
+              </div>
+            </button>
+          );
+        })}
       </div>
 
       <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius)", overflow: "hidden", boxShadow: "var(--shadow)" }}>
@@ -235,9 +395,17 @@ export default function ViolationMonitoringPanel({
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: ".8rem", minWidth: "1100px" }}>
             <thead>
               <tr style={{ background: "var(--surface2)", borderBottom: "1px solid var(--border2)" }}>
-                {["#", "Driver", "Vehicle", "Beginning", "Initial Location", "End", "Final Location", "Value (RPM)", "Max Speed", "Duration", "Mileage"].map((h) => (
-                  <th key={h} style={{ ...thStyle, textAlign: ["Value (RPM)", "Max Speed", "Duration", "Mileage"].includes(h) ? "right" : "left" }}>{h}</th>
-                ))}
+                <th style={{ ...thStyle, textAlign: "left" }}>#</th>
+                <SortHeader sortKey="driver" label="Driver" sort={violationSort} onToggle={toggleViolationSort} thStyle={thStyle} />
+                <SortHeader sortKey="vehicle" label="Vehicle" sort={violationSort} onToggle={toggleViolationSort} thStyle={thStyle} />
+                <SortHeader sortKey="beginning" label="Beginning" sort={violationSort} onToggle={toggleViolationSort} thStyle={thStyle} />
+                <SortHeader sortKey="initialLocation" label="Initial Location" sort={violationSort} onToggle={toggleViolationSort} thStyle={thStyle} />
+                <SortHeader sortKey="end" label="End" sort={violationSort} onToggle={toggleViolationSort} thStyle={thStyle} />
+                <SortHeader sortKey="finalLocation" label="Final Location" sort={violationSort} onToggle={toggleViolationSort} thStyle={thStyle} />
+                <SortHeader sortKey="avgSpeed" label="Value (RPM)" sort={violationSort} onToggle={toggleViolationSort} align="right" thStyle={thStyle} />
+                <SortHeader sortKey="maxSpeed" label="Max Speed" sort={violationSort} onToggle={toggleViolationSort} align="right" thStyle={thStyle} />
+                <SortHeader sortKey="duration" label="Duration" sort={violationSort} onToggle={toggleViolationSort} align="right" thStyle={thStyle} />
+                <SortHeader sortKey="mileage" label="Mileage" sort={violationSort} onToggle={toggleViolationSort} align="right" thStyle={thStyle} />
               </tr>
             </thead>
             <tbody>

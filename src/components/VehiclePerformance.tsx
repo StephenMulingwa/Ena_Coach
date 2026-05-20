@@ -7,7 +7,14 @@ import type { SharedTabProps } from "../lib/data";
 import { CornerDownRight, Truck } from "lucide-react";
 import * as XLSX from "xlsx";
 import { buildVehicleMissingOrdinalMap, formatDriverDisplay, isMissingDriver } from "../lib/driverDisplay";
-import { downloadPdfTable } from "../lib/exportPdfTable";
+import { exportEnaReportPdf, formatDateRangeLabel } from "../lib/exportEnaReportPdf";
+import {
+  SortHeader,
+  parseDurationSeconds,
+  parseFirstNumber,
+  sortRowsBy,
+  useTableSort,
+} from "../lib/sortableTable";
 
 function makeTimestamp() {
   const now = new Date();
@@ -18,6 +25,12 @@ function makeTimestamp() {
   const min = String(now.getMinutes()).padStart(2, "0");
   const ss = String(now.getSeconds()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}_${hh}-${min}-${ss}`;
+}
+
+function safeNumber(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : parseFirstNumber(value as string | number | null | undefined);
 }
 
 export default function VehiclePerformancePage({
@@ -53,6 +66,52 @@ export default function VehiclePerformancePage({
     for (const v of vehiclePerformance) map.set(v.vehicle, v);
     return map;
   }, [vehiclePerformance]);
+
+  type VehicleSortKey =
+    | "vehicle"
+    | "distance"
+    | "fuelConsumed"
+    | "consumption"
+    | "fillings"
+    | "fuelFilled"
+    | "drains"
+    | "fuelDrained"
+    | "avgSpeed"
+    | "engineHours"
+    | "idlingTime";
+  const { sort: vehicleSort, toggleSort: toggleVehicleSort } = useTableSort<VehicleSortKey>(null);
+  const sortedDrivers = useMemo(
+    () =>
+      sortRowsBy(drivers, vehicleSort, (row, key) => {
+        switch (key) {
+          case "vehicle":
+            return row.vehicle;
+          case "distance":
+            return Number(row.distance ?? 0);
+          case "fuelConsumed":
+            return Number(row.fuelConsumed ?? 0);
+          case "consumption":
+            return Number(row.avgConsumption ?? 0);
+          case "fillings":
+            return Number(row.totalFillings ?? 0);
+          case "fuelFilled":
+            return Number(row.fuelFilled ?? 0);
+          case "drains":
+            return Number(row.totalDrains ?? 0);
+          case "fuelDrained":
+            return Number(row.fuelDrained ?? 0);
+          case "avgSpeed":
+            return parseFirstNumber(row.avgSpeed as unknown as string | number);
+          case "engineHours":
+            return parseDurationSeconds(row.engineRunningTime);
+          case "idlingTime":
+            return parseDurationSeconds(row.idlingEngineTime ?? "00:00:00");
+          default:
+            return 0;
+        }
+      }),
+    [drivers, vehicleSort],
+  );
 
   const vehicleRowsForDownload = useMemo(() => {
     const rows: Array<Record<string, string | number>> = [];
@@ -126,11 +185,30 @@ export default function VehiclePerformancePage({
       row.engineTime,
       row.idlingTime,
     ]);
-    downloadPdfTable({
-      title: "Vehicle Performance",
-      head,
-      body,
-      fileName: `vehicle_performance_${makeTimestamp()}.pdf`,
+
+    const totalVehicles = drivers.length;
+    const totalDistance = drivers.reduce((sum, d) => sum + safeNumber(d.distance), 0);
+    const totalFuelConsumed = drivers.reduce((sum, d) => sum + safeNumber(d.fuelConsumed), 0);
+    const totalFuelFilled = drivers.reduce((sum, d) => sum + safeNumber(d.fuelFilled), 0);
+    const totalFuelDrained = drivers.reduce((sum, d) => sum + safeNumber(d.fuelDrained), 0);
+    const avgConsumption = totalFuelConsumed > 0 ? totalDistance / totalFuelConsumed : 0;
+
+    void exportEnaReportPdf({
+      title: "Ena Fleet Vehicle Performance Report",
+      subtitle: formatDateRangeLabel(startDate, endDate),
+      summary: [
+        { label: "Vehicles", value: totalVehicles.toLocaleString() },
+        { label: "Total Distance", value: `${totalDistance.toFixed(0)} km` },
+        { label: "Fuel Consumed", value: `${totalFuelConsumed.toFixed(2)} L` },
+        { label: "Avg Consumption", value: `${avgConsumption.toFixed(2)} km/L` },
+      ],
+      narrative:
+        totalVehicles === 0
+          ? "No vehicle activity recorded for this period."
+          : `Performance summary for ${totalVehicles} vehicle${totalVehicles === 1 ? "" : "s"}. Refills ${totalFuelFilled.toFixed(2)} L, drains ${totalFuelDrained.toFixed(2)} L. Each vehicle row is followed by its driver-level breakdown.`,
+      sections: [{ heading: "Vehicle & Driver Breakdown", head, body }],
+      fileName: `ena_fleet_vehicle_performance_${makeTimestamp()}.pdf`,
+      landscape: true,
     });
   };
 
@@ -191,21 +269,21 @@ export default function VehiclePerformancePage({
             <thead>
               <tr style={{ background: "var(--surface2)", borderBottom: "1px solid var(--border2)" }}>
                 <th style={{ ...thStyle, width: "46px" }}>View</th>
-                <th style={thStyle}>Vehicle</th>
-                <th style={{ ...thStyle, textAlign: "right" }}>Distance (km)</th>
-                <th style={{ ...thStyle, textAlign: "right" }}>Consumed Fuel (L)</th>
-                <th style={{ ...thStyle, textAlign: "right" }}>Consumption (km/L)</th>
-                <th style={{ ...thStyle, textAlign: "right" }}># Fillings</th>
-                <th style={{ ...thStyle, textAlign: "right" }}>Total Filled</th>
-                <th style={{ ...thStyle, textAlign: "right" }}># Drains</th>
-                <th style={{ ...thStyle, textAlign: "right" }}>Total Drained</th>
-                <th style={{ ...thStyle, textAlign: "right" }}>Avg Speed</th>
-                <th style={{ ...thStyle, textAlign: "right" }}>Engine Hours</th>
-                <th style={{ ...thStyle, textAlign: "right" }}>Idling Time</th>
+                <SortHeader sortKey="vehicle" label="Vehicle" sort={vehicleSort} onToggle={toggleVehicleSort} thStyle={thStyle} />
+                <SortHeader sortKey="distance" label="Distance (km)" sort={vehicleSort} onToggle={toggleVehicleSort} align="right" thStyle={thStyle} />
+                <SortHeader sortKey="fuelConsumed" label="Consumed Fuel (L)" sort={vehicleSort} onToggle={toggleVehicleSort} align="right" thStyle={thStyle} />
+                <SortHeader sortKey="consumption" label="Consumption (km/L)" sort={vehicleSort} onToggle={toggleVehicleSort} align="right" thStyle={thStyle} />
+                <SortHeader sortKey="fillings" label="# Fillings" sort={vehicleSort} onToggle={toggleVehicleSort} align="right" thStyle={thStyle} />
+                <SortHeader sortKey="fuelFilled" label="Total Filled" sort={vehicleSort} onToggle={toggleVehicleSort} align="right" thStyle={thStyle} />
+                <SortHeader sortKey="drains" label="# Drains" sort={vehicleSort} onToggle={toggleVehicleSort} align="right" thStyle={thStyle} />
+                <SortHeader sortKey="fuelDrained" label="Total Drained" sort={vehicleSort} onToggle={toggleVehicleSort} align="right" thStyle={thStyle} />
+                <SortHeader sortKey="avgSpeed" label="Avg Speed" sort={vehicleSort} onToggle={toggleVehicleSort} align="right" thStyle={thStyle} />
+                <SortHeader sortKey="engineHours" label="Engine Hours" sort={vehicleSort} onToggle={toggleVehicleSort} align="right" thStyle={thStyle} />
+                <SortHeader sortKey="idlingTime" label="Idling Time" sort={vehicleSort} onToggle={toggleVehicleSort} align="right" thStyle={thStyle} />
               </tr>
             </thead>
             <tbody>
-              {drivers.map((d) => {
+              {sortedDrivers.map((d) => {
                 const isExpanded = expandedVehicle === d.vehicle;
                 const perf = perfByVehicle.get(d.vehicle);
                 const detailDrivers = perf?.drivers ?? [];

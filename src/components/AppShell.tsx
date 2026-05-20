@@ -7,7 +7,6 @@ import {
   UserRoundSearch,
   BusFront,
   ShieldAlert,
-  Droplets,
   FileBarChart2,
   Stethoscope,
   Menu,
@@ -17,7 +16,6 @@ import Dashboard from "./Dashboard";
 import DriverEvaluation from "./DriverEvaluation";
 import VehiclePerformancePage from "./VehiclePerformance";
 import Violations from "./Violations";
-import Fuel from "./Fuel";
 import Reports from "./Reports";
 import Diagnostics from "./Diagnostics";
 import { getDefaultOpsRange, type DateRange } from "../lib/dateRange";
@@ -31,7 +29,6 @@ const TABS = [
   { id: "vehicles", label: "Vehicle Performance", icon: BusFront },
   { id: "violations", label: "Violations", icon: ShieldAlert },
   { id: "diagnostics", label: "Diagnostics", icon: Stethoscope },
-  { id: "fuel", label: "Fuel", icon: Droplets },
   { id: "reports", label: "Reports", icon: FileBarChart2 },
 ] as const;
 
@@ -141,13 +138,13 @@ export default function AppShell({ onLogout, initialData = null }: AppShellProps
 
   const headerPadStyle: CSSProperties = isMobileNav
     ? {
-        paddingTop: 8,
-        paddingBottom: 8,
+        paddingTop: "calc(12px + env(safe-area-inset-top, 0px))",
+        paddingBottom: 10,
         paddingLeft: "max(10px, env(safe-area-inset-left, 0px))",
         paddingRight: "max(10px, env(safe-area-inset-right, 0px))",
       }
     : {
-        paddingTop: 0,
+        paddingTop: "env(safe-area-inset-top, 0px)",
         paddingBottom: 0,
         paddingLeft: "max(24px, env(safe-area-inset-left, 0px))",
         paddingRight: "max(24px, env(safe-area-inset-right, 0px))",
@@ -188,6 +185,7 @@ export default function AppShell({ onLogout, initialData = null }: AppShellProps
     <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh" }}>
       <header
         ref={headerRef}
+        className="app-shell-header"
         style={{
           ...headerPadStyle,
           position: "sticky",
@@ -671,7 +669,6 @@ export default function AppShell({ onLogout, initialData = null }: AppShellProps
           {activeTab === "drivers" && <DriverEvaluation {...sharedProps} />}
           {activeTab === "vehicles" && <VehiclePerformancePage {...sharedProps} />}
           {activeTab === "violations" && <Violations {...sharedProps} />}
-          {activeTab === "fuel" && <Fuel {...sharedProps} />}
           {activeTab === "reports" && <Reports {...sharedProps} />}
           {activeTab === "diagnostics" && <Diagnostics {...sharedProps} />}
         </main>

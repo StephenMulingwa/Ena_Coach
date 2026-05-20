@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import ServiceWorkerRegister from "@/components/ServiceWorkerRegister";
 import "./globals.css";
 
 export const viewport: Viewport = {
@@ -11,16 +12,13 @@ export const viewport: Viewport = {
 export const metadata: Metadata = {
   title: "Ena Fleet Insights",
   description: "Fleet management and driver evaluation dashboard",
-  icons: {
-    icon: [
-      { url: "/favicon.ico?v=5", type: "image/x-icon", sizes: "any" },
-      { url: "/enalogo.png?v=3", type: "image/png", sizes: "32x32" },
-      { url: "/enalogo.png?v=3", type: "image/png", sizes: "192x192" },
-      { url: "/enalogo.png?v=3", type: "image/png", sizes: "512x512" },
-    ],
-    shortcut: [{ url: "/favicon.ico?v=5", type: "image/x-icon" }],
-    apple: [{ url: "/enalogo.png?v=3", type: "image/png" }],
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Ena Fleet",
   },
+  applicationName: "Ena Fleet Insights",
 };
 
 export default function RootLayout({
@@ -30,7 +28,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className="antialiased">{children}</body>
+      <body className="antialiased">
+        <ServiceWorkerRegister />
+        {children}
+      </body>
     </html>
   );
 }

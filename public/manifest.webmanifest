@@ -1,0 +1,32 @@
+{
+  "name": "Ena Fleet Insights",
+  "short_name": "Ena Fleet",
+  "description": "Live fleet positions, driver evaluation, and operations reports for Ena Coach.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f2f7ff",
+  "theme_color": "#0b2f85",
+  "categories": ["business", "productivity"],
+  "icons": [
+    {
+      "src": "/enalogo.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/enalogo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/enalogo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

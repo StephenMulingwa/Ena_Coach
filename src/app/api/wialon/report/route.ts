@@ -100,6 +100,24 @@ function cellCoords(cell: RawCell | undefined) {
   return "";
 }
 
+// Always treat naked datetime strings (e.g. "2026-05-12T06:20" from a
+// <input type="datetime-local">) as Kenya time (EAT, UTC+3). Without this,
+// `new Date(...)` would parse them in the server's local timezone — which is
+// UTC on Vercel and EAT in local Windows dev — causing the displayed times
+// to drift by 3 hours in production.
+function parseKenyaDateTime(input: string): number {
+  const raw = String(input ?? "").trim();
+  if (!raw) return NaN;
+  // If the caller already specified a timezone (Z or ±HH:MM/±HHMM), trust it.
+  if (/(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(raw)) {
+    return new Date(raw).getTime();
+  }
+  // Otherwise, anchor to Kenya time. Ensure seconds are present so the
+  // resulting string is a valid ISO 8601 datetime.
+  const withSeconds = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(raw) ? `${raw}:00` : raw;
+  return new Date(`${withSeconds}+03:00`).getTime();
+}
+
 function shiftWialonDateTime(value: string, hoursToAdd = 3) {
   const raw = String(value ?? "").trim();
   if (!raw || raw === "-----") return raw;
@@ -243,14 +261,14 @@ async function callWialon<T>(svc: string, params: object, sid: string) {
     cache: "no-store",
   });
   if (!response.ok) {
-    throw new Error(`Wialon ${svc} failed with ${response.status}`);
+    throw new Error(`Track3 Database request failed (status ${response.status}).`);
   }
   const payload = (await response.json()) as { error?: number; reason?: string } | T;
   if (typeof payload === "object" && payload !== null && "error" in payload) {
     const errPayload = payload as { error?: number; reason?: string };
     if (typeof errPayload.error === "number" && errPayload.error !== 0) {
       throw new Error(
-        `Wialon ${svc} error ${String(errPayload.error)}${errPayload.reason ? `: ${errPayload.reason}` : ""}`,
+        `Track3 Database error ${String(errPayload.error)}${errPayload.reason ? `: ${errPayload.reason}` : ""}`,
       );
     }
   }
@@ -305,7 +323,7 @@ export async function GET(request: Request) {
     const token = process.env.WIALON_TOKEN;
     if (!token) {
       return NextResponse.json(
-        { error: "Missing WIALON_TOKEN environment variable." },
+        { error: "Track3 Database access token is not configured on the server." },
         { status: 500 },
       );
     }
@@ -317,8 +335,8 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Missing from/to query parameters." }, { status: 400 });
     }
 
-    const from = Math.floor(new Date(fromISO).getTime() / 1000);
-    const to = Math.floor(new Date(toISO).getTime() / 1000);
+    const from = Math.floor(parseKenyaDateTime(fromISO) / 1000);
+    const to = Math.floor(parseKenyaDateTime(toISO) / 1000);
     if (!Number.isFinite(from) || !Number.isFinite(to) || from >= to) {
       return NextResponse.json(
         { error: "Invalid from/to date range. Use valid ISO datetimes (from < to)." },
@@ -331,15 +349,19 @@ export async function GET(request: Request) {
       { method: "POST", cache: "no-store" },
     );
     if (!loginResponse.ok) {
-      throw new Error(`Wialon token/login failed with ${loginResponse.status}`);
+      throw new Error(
+        `Track3 Database authentication failed (status ${loginResponse.status}).`,
+      );
     }
     const login = (await loginResponse.json()) as { eid?: string; error?: number; reason?: string };
     if (typeof login.error === "number") {
-      throw new Error(`Wialon token/login error ${login.error}${login.reason ? `: ${login.reason}` : ""}`);
+      throw new Error(
+        `Track3 Database authentication error ${login.error}${login.reason ? `: ${login.reason}` : ""}`,
+      );
     }
     const sid = login.eid;
     if (typeof sid !== "string" || !sid) {
-      throw new Error("Wialon login failed.");
+      throw new Error("Track3 Database authentication failed.");
     }
 
     const exec = await callWialon<{ reportResult?: { tables?: Array<{ header?: string[]; rows?: number }> } }>(
@@ -621,8 +643,12 @@ export async function GET(request: Request) {
     await callWialon("core/logout", {}, sid).catch(() => undefined);
     return NextResponse.json(payload, { status: 200 });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown Wialon error.";
-    console.error("[api/wialon/report]", message);
-    return NextResponse.json({ error: message }, { status: 500 });
+    const rawMessage = error instanceof Error ? error.message : "";
+    const safeMessage =
+      rawMessage && rawMessage.trim().length > 0
+        ? rawMessage.replace(/wialon/gi, "Track3 Database")
+        : "Unknown Track3 Database error.";
+    console.error("[api/track3/report]", safeMessage);
+    return NextResponse.json({ error: safeMessage }, { status: 500 });
   }
 }

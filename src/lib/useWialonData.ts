@@ -48,7 +48,7 @@ export function useWialonData(
           } catch {
             details = "";
           }
-          throw new Error(`Wialon request failed (${response.status})${details}`);
+          throw new Error(`Track3 Database request failed (${response.status})${details}`);
         }
         const payload = (await response.json()) as WialonDataset;
         if (alive) {
@@ -56,7 +56,10 @@ export function useWialonData(
         }
       } catch (err) {
         if (!alive || controller.signal.aborted) return;
-        const message = err instanceof Error ? err.message : "Failed to fetch Wialon data.";
+        const message =
+          err instanceof Error && err.message
+            ? err.message
+            : "Failed to fetch data from Track3 Database.";
         setError(message);
       } finally {
         if (alive) {

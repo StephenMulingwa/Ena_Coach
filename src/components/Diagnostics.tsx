@@ -7,7 +7,14 @@ import type { SharedTabProps, ViolationRecord } from "../lib/data";
 import { useMediaQuery } from "../lib/useMediaQuery";
 import { LAYOUT_NARROW_QUERY } from "../lib/breakpoints";
 import { buildVehicleMissingOrdinalMap, formatDriverDisplay, isMissingDriver } from "../lib/driverDisplay";
-import { downloadPdfTable } from "../lib/exportPdfTable";
+import { exportEnaReportPdf, formatDateRangeLabel } from "../lib/exportEnaReportPdf";
+import {
+  SortHeader,
+  parseDateTimeMs,
+  parseDurationSeconds,
+  sortRowsBy,
+  useTableSort,
+} from "../lib/sortableTable";
 import * as XLSX from "xlsx";
 
 function makeTimestamp() {
@@ -119,6 +126,73 @@ export default function Diagnostics({
     });
   }, [violations, typeFilter, vehicleFilter]);
 
+  type DiagSortKey =
+    | "driver"
+    | "vehicle"
+    | "beginning"
+    | "end"
+    | "duration"
+    | "distance"
+    | "initialLocation"
+    | "finalLocation";
+  const { sort: diagSort, toggleSort: toggleDiagSort } = useTableSort<DiagSortKey>(null);
+
+  // Build a sortable extractor once so the on-screen table and the downloads
+  // sort the rows the same way.
+  const sortDiagRows = useCallback(
+    (rows: ViolationRecord[]) =>
+      sortRowsBy(rows, diagSort, (row, key) => {
+        switch (key) {
+          case "driver":
+            return formatDriverCell(row.vehicle, row.driver);
+          case "vehicle":
+            return row.vehicle;
+          case "beginning":
+            return parseDateTimeMs(row.beginning);
+          case "end":
+            return parseDateTimeMs(row.end);
+          case "duration":
+            return parseDurationSeconds(row.duration);
+          case "distance":
+            return parseKm(row.mileage);
+          case "initialLocation":
+            return row.initialLocation;
+          case "finalLocation":
+            return row.finalLocation;
+          default:
+            return 0;
+        }
+      }),
+    [diagSort, formatDriverCell],
+  );
+
+  const sortedFiltered = useMemo(() => sortDiagRows(filtered), [sortDiagRows, filtered]);
+
+  /** All five diagnostic types with their (vehicle-scoped) rows, used by the
+   *  bulk PDF and XLSX downloads so each export contains a section/sheet per
+   *  type regardless of which one is selected on screen. */
+  const diagnosticTypesForDownload = useMemo(
+    () =>
+      DIAGNOSTIC_TYPES.map((type) => {
+        const rowsForType = violations.filter(
+          (v) =>
+            v.violation === type &&
+            (vehicleFilter === "All" || v.vehicle === vehicleFilter),
+        );
+        const rows = sortDiagRows(rowsForType);
+        const totalSeconds = rows.reduce((sum, r) => sum + durationToSeconds(r.duration), 0);
+        const totalKm = rows.reduce((sum, r) => sum + parseKm(r.mileage), 0);
+        return {
+          type,
+          rows,
+          count: rows.length,
+          duration: secondsToDuration(totalSeconds),
+          distanceKm: totalKm,
+        };
+      }),
+    [violations, vehicleFilter, sortDiagRows],
+  );
+
   const downloadInstancesPdf = useCallback(() => {
     const head = [[
       "#",
@@ -131,25 +205,49 @@ export default function Diagnostics({
       "Initial Location",
       "Final Location",
     ]];
-    const body = filtered.map((r, i) => [
-      i + 1,
-      formatDriverCell(r.vehicle, r.driver),
-      r.vehicle,
-      r.beginning,
-      r.end,
-      r.duration,
-      parseKm(r.mileage).toFixed(1),
-      r.initialLocation,
-      r.finalLocation,
-    ]);
-    downloadPdfTable({
-      title: `Diagnostics — ${typeFilter}${vehicleFilter !== "All" ? ` (${vehicleFilter})` : ""}`,
+
+    const totalInstances = diagnosticTypesForDownload.reduce((sum, t) => sum + t.count, 0);
+    const totalSecondsAll = diagnosticTypesForDownload.reduce(
+      (sum, t) => sum + durationToSeconds(t.duration),
+      0,
+    );
+    const scopeLabel = vehicleFilter === "All" ? "All Vehicles" : vehicleFilter;
+
+    const sections = diagnosticTypesForDownload.map((t) => ({
+      heading: `${t.type} — ${t.count.toLocaleString()} instance${t.count === 1 ? "" : "s"} · Duration ${t.duration} · ${t.distanceKm.toFixed(1)} km`,
       head,
-      body,
-      fileName: `diagnostics_instances_${makeTimestamp()}.pdf`,
+      body:
+        t.rows.length === 0
+          ? [["—", `No "${t.type}" instances recorded for ${scopeLabel}.`, "", "", "", "", "", "", ""]]
+          : t.rows.map((r, i) => [
+              i + 1,
+              formatDriverCell(r.vehicle, r.driver),
+              r.vehicle,
+              r.beginning,
+              r.end,
+              r.duration,
+              parseKm(r.mileage).toFixed(1),
+              r.initialLocation || "—",
+              r.finalLocation || "—",
+            ]),
+    }));
+
+    void exportEnaReportPdf({
+      title: "Ena Fleet Diagnostics Report",
+      subtitle: formatDateRangeLabel(startDate, endDate),
+      summary: diagnosticTypesForDownload.map((t) => ({
+        label: t.type,
+        value: `${t.count.toLocaleString()} · ${t.duration}`,
+      })),
+      narrative:
+        totalInstances === 0
+          ? `No diagnostic instances were recorded for ${scopeLabel} during this period.`
+          : `Diagnostics across all event types for ${scopeLabel}. ${totalInstances.toLocaleString()} total instance${totalInstances === 1 ? "" : "s"} · combined duration ${secondsToDuration(totalSecondsAll)}.`,
+      sections,
+      fileName: `ena_fleet_diagnostics_${makeTimestamp()}.pdf`,
       landscape: true,
     });
-  }, [filtered, formatDriverCell, typeFilter, vehicleFilter]);
+  }, [diagnosticTypesForDownload, formatDriverCell, vehicleFilter, startDate, endDate]);
 
   const downloadInstancesXlsx = useCallback(() => {
     const headers = [
@@ -163,28 +261,47 @@ export default function Diagnostics({
       "Initial Location",
       "Final Location",
     ];
-    const aoa: (string | number)[][] = [headers];
-    filtered.forEach((r, i) => {
-      aoa.push([
-        i + 1,
-        formatDriverCell(r.vehicle, r.driver),
-        r.vehicle,
-        r.beginning,
-        r.end,
-        r.duration,
-        parseKm(r.mileage).toFixed(1),
-        r.initialLocation,
-        r.finalLocation,
-      ]);
-    });
-    const sheet = XLSX.utils.aoa_to_sheet(aoa);
     const book = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(book, sheet, "Instances");
-    XLSX.writeFile(book, `diagnostics_instances_${makeTimestamp()}.xlsx`);
-  }, [filtered, formatDriverCell]);
+    const usedNames = new Set<string>();
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
-  const pagedRows = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+    for (const t of diagnosticTypesForDownload) {
+      const aoa: (string | number)[][] = [headers];
+      if (t.rows.length === 0) {
+        aoa.push(["—", `No "${t.type}" instances recorded.`]);
+      } else {
+        t.rows.forEach((r, i) => {
+          aoa.push([
+            i + 1,
+            formatDriverCell(r.vehicle, r.driver),
+            r.vehicle,
+            r.beginning,
+            r.end,
+            r.duration,
+            parseKm(r.mileage).toFixed(1),
+            r.initialLocation,
+            r.finalLocation,
+          ]);
+        });
+      }
+      const sheet = XLSX.utils.aoa_to_sheet(aoa);
+      // Excel sheet names: max 31 chars, no / \ ? * [ ].
+      const baseName = t.type.replace(/[\\/?*[\]]/g, "-").slice(0, 31);
+      let name = baseName;
+      let suffix = 2;
+      while (usedNames.has(name)) {
+        const candidate = `${baseName.slice(0, 28)} (${suffix})`;
+        name = candidate.slice(0, 31);
+        suffix += 1;
+      }
+      usedNames.add(name);
+      XLSX.utils.book_append_sheet(book, sheet, name);
+    }
+
+    XLSX.writeFile(book, `ena_fleet_diagnostics_${makeTimestamp()}.xlsx`);
+  }, [diagnosticTypesForDownload, formatDriverCell]);
+
+  const totalPages = Math.max(1, Math.ceil(sortedFiltered.length / pageSize));
+  const pagedRows = sortedFiltered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   const cards = useMemo(() => {
     const totalDistanceKm =
@@ -207,13 +324,17 @@ export default function Diagnostics({
     });
   }, [violations, vehicleFilter, drivers]);
 
-  const cardStyle: CSSProperties = {
+  const baseCardStyle: CSSProperties = {
     background: "var(--surface)",
-    border: "1px solid var(--border)",
     borderRadius: "var(--radius)",
-    boxShadow: "var(--shadow)",
     overflow: "hidden",
     position: "relative",
+    cursor: "pointer",
+    appearance: "none",
+    textAlign: "left",
+    transition: "transform .15s ease, box-shadow .15s ease, border-color .15s ease",
+    minWidth: 0,
+    width: "100%",
   };
 
   const colors = ["#10b981", "#3b82f6", "#f59e0b", "#ef4444", "#8b5cf6"];
@@ -238,36 +359,6 @@ export default function Diagnostics({
       {error && <p style={{ color: "var(--red)", marginBottom: 12, fontSize: ".82rem" }}>{error}</p>}
 
       <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", marginBottom: 14 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: ".66rem", color: "#000000", fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em" }}>
-            Type
-          </span>
-          <select
-            value={typeFilter}
-            onChange={(e) => {
-              setTypeFilter(e.target.value as (typeof DIAGNOSTIC_TYPES)[number]);
-              setCurrentPage(1);
-            }}
-            style={{
-              padding: "6px 10px",
-              background: "var(--surface)",
-              border: "1px solid var(--border)",
-              borderRadius: "var(--radius-sm)",
-              color: "var(--text)",
-              fontSize: ".76rem",
-              fontWeight: 600,
-              outline: "none",
-              colorScheme: "light",
-              cursor: "pointer",
-              minWidth: 220,
-            }}
-          >
-            {DIAGNOSTIC_TYPES.map((t) => (
-              <option key={t} value={t}>{t}</option>
-            ))}
-          </select>
-        </div>
-
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ fontSize: ".66rem", color: "#000000", fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em" }}>
             Vehicle
@@ -307,22 +398,40 @@ export default function Diagnostics({
           gap: "14px",
         }}
       >
-        {cards.map((c, idx) => (
-          <div key={c.type} style={cardStyle}>
-            <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: `linear-gradient(90deg, ${colors[idx % colors.length]}, transparent)` }} />
-            <div style={{ padding: "14px 16px 12px" }}>
-              <div style={{ fontSize: ".7rem", color: "#000000", textTransform: "uppercase", letterSpacing: ".06em", fontWeight: 800, marginBottom: 10 }}>
-                {c.type}
+        {cards.map((c, idx) => {
+          const color = colors[idx % colors.length];
+          const isActive = c.type === typeFilter;
+          return (
+            <button
+              key={c.type}
+              type="button"
+              onClick={() => {
+                setTypeFilter(c.type);
+                setCurrentPage(1);
+              }}
+              aria-pressed={isActive}
+              style={{
+                ...baseCardStyle,
+                border: isActive ? `2px solid ${color}` : "1px solid var(--border)",
+                boxShadow: isActive ? `0 0 0 3px ${color}22, var(--shadow)` : "var(--shadow)",
+                transform: isActive ? "translateY(-1px)" : "none",
+              }}
+            >
+              <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: `linear-gradient(90deg, ${color}, transparent)` }} />
+              <div style={{ padding: "14px 16px 12px" }}>
+                <div style={{ fontSize: ".7rem", color: "#000000", textTransform: "uppercase", letterSpacing: ".06em", fontWeight: 800, marginBottom: 10 }}>
+                  {c.type}
+                </div>
+                <div style={{ fontFamily: "var(--font-mono)", fontSize: "1.05rem", fontWeight: 900, color: "var(--text)", lineHeight: 1.15 }}>
+                  {c.duration}
+                </div>
+                <div style={{ marginTop: 6, fontFamily: "var(--font-body)", fontSize: ".86rem", color: "var(--text2)", fontWeight: 800 }}>
+                  {c.distance}
+                </div>
               </div>
-              <div style={{ fontFamily: "var(--font-mono)", fontSize: "1.05rem", fontWeight: 900, color: "var(--text)", lineHeight: 1.15 }}>
-                {c.duration}
-              </div>
-              <div style={{ marginTop: 6, fontFamily: "var(--font-body)", fontSize: ".86rem", color: "var(--text2)", fontWeight: 800 }}>
-                {c.distance}
-              </div>
-            </div>
-          </div>
-        ))}
+            </button>
+          );
+        })}
       </div>
 
       <div style={{ marginTop: 18, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius)", overflow: "hidden", boxShadow: "var(--shadow)" }}>
@@ -337,9 +446,9 @@ export default function Diagnostics({
               style={{
                 padding: "6px 10px",
                 borderRadius: "var(--radius-sm)",
-                border: "1px solid rgba(47,111,237,0.35)",
-                background: "rgba(47,111,237,0.1)",
-                color: "var(--blue)",
+                border: "1px solid rgba(220,38,38,0.35)",
+                background: "rgba(220,38,38,0.1)",
+                color: "#b91c1c",
                 fontWeight: 700,
                 fontSize: ".76rem",
                 cursor: "pointer",
@@ -361,7 +470,7 @@ export default function Diagnostics({
                 cursor: "pointer",
               }}
             >
-              Download XLSX
+              Download All Types (XLSX)
             </button>
             <div style={{ fontSize: ".76rem", color: "var(--text2)" }}>
               {typeFilter}{vehicleFilter !== "All" ? ` • ${vehicleFilter}` : ""} • {filtered.length} rows
@@ -373,24 +482,31 @@ export default function Diagnostics({
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: ".8rem", minWidth: "1100px" }}>
             <thead>
               <tr style={{ background: "var(--surface2)", borderBottom: "1px solid var(--border2)" }}>
-                {["#", "Driver", "Vehicle", "Beginning", "End", "Duration", "Distance (km)", "Initial Location", "Final Location"].map((h) => (
-                  <th
-                    key={h}
-                    style={{
-                      padding: "11px 12px",
-                      textAlign: ["Duration", "Distance (km)"].includes(h) ? "right" : "left",
-                      fontFamily: "var(--font-body)",
-                      fontSize: ".65rem",
-                      fontWeight: 800,
-                      textTransform: "uppercase",
-                      letterSpacing: ".05em",
-                      color: "#000000",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {h}
-                  </th>
-                ))}
+                {(() => {
+                  const diagThStyle: CSSProperties = {
+                    padding: "11px 12px",
+                    fontFamily: "var(--font-body)",
+                    fontSize: ".65rem",
+                    fontWeight: 800,
+                    textTransform: "uppercase",
+                    letterSpacing: ".05em",
+                    color: "#000000",
+                    whiteSpace: "nowrap",
+                  };
+                  return (
+                    <>
+                      <th style={{ ...diagThStyle, textAlign: "left" }}>#</th>
+                      <SortHeader sortKey="driver" label="Driver" sort={diagSort} onToggle={toggleDiagSort} thStyle={diagThStyle} />
+                      <SortHeader sortKey="vehicle" label="Vehicle" sort={diagSort} onToggle={toggleDiagSort} thStyle={diagThStyle} />
+                      <SortHeader sortKey="beginning" label="Beginning" sort={diagSort} onToggle={toggleDiagSort} thStyle={diagThStyle} />
+                      <SortHeader sortKey="end" label="End" sort={diagSort} onToggle={toggleDiagSort} thStyle={diagThStyle} />
+                      <SortHeader sortKey="duration" label="Duration" sort={diagSort} onToggle={toggleDiagSort} align="right" thStyle={diagThStyle} />
+                      <SortHeader sortKey="distance" label="Distance (km)" sort={diagSort} onToggle={toggleDiagSort} align="right" thStyle={diagThStyle} />
+                      <SortHeader sortKey="initialLocation" label="Initial Location" sort={diagSort} onToggle={toggleDiagSort} thStyle={diagThStyle} />
+                      <SortHeader sortKey="finalLocation" label="Final Location" sort={diagSort} onToggle={toggleDiagSort} thStyle={diagThStyle} />
+                    </>
+                  );
+                })()}
               </tr>
             </thead>
             <tbody>
