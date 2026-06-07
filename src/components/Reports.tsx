@@ -33,6 +33,16 @@ const REPORT_CARDS: ReportCardConfig[] = [
     borderColor: "rgba(47,111,237,0.18)",
   },
   {
+    id: "map",
+    title: "Map",
+    description: "Live positions of all fleet vehicles on an interactive map",
+    Icon: MapPin,
+    iconColor: "#0b2f85",
+    iconBackground: "rgba(11,47,133,0.14)",
+    cardBackground: "linear-gradient(135deg, #e8f0ff 0%, #eef5ff 100%)",
+    borderColor: "rgba(11,47,133,0.2)",
+  },
+  {
     id: "speed",
     title: "Speed Monitoring",
     description: "Speed bands and detailed trip records by vehicle",
@@ -51,16 +61,6 @@ const REPORT_CARDS: ReportCardConfig[] = [
     iconBackground: "rgba(225,29,72,0.16)",
     cardBackground: "linear-gradient(135deg, #ffe9ee 0%, #fff2f5 100%)",
     borderColor: "rgba(225,29,72,0.18)",
-  },
-  {
-    id: "map",
-    title: "Map",
-    description: "Live positions of all fleet vehicles on an interactive map",
-    Icon: MapPin,
-    iconColor: "#0b2f85",
-    iconBackground: "rgba(11,47,133,0.14)",
-    cardBackground: "linear-gradient(135deg, #e8f0ff 0%, #eef5ff 100%)",
-    borderColor: "rgba(11,47,133,0.2)",
   },
 ];
 

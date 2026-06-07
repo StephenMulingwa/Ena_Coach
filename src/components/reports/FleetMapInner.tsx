@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo } from "react";
-import { CircleMarker, MapContainer, Popup, TileLayer, useMap } from "react-leaflet";
+import { CircleMarker, MapContainer, Popup, TileLayer, Tooltip, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
@@ -53,8 +53,7 @@ export default function FleetMapInner({ units, loading = false, onRefresh }: Fle
         }}
       >
         <p style={{ margin: 0, fontSize: ".86rem", color: "var(--text2)", fontWeight: 500, maxWidth: 520 }}>
-          Live positions for all tracked vehicles. Tap a marker for vehicle, driver, and last update. Pan and zoom
-          as needed.
+          Live positions for all tracked vehicles. Registration labels sit beside each dot; tap a dot for full details.
         </p>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
           <span
@@ -145,6 +144,14 @@ export default function FleetMapInner({ units, loading = false, onRefresh }: Fle
                 fillOpacity: 0.92,
               }}
             >
+              <Tooltip
+                permanent
+                direction="right"
+                offset={[10, 0]}
+                className="fleet-map-label"
+              >
+                {unit.vehicle}
+              </Tooltip>
               <Popup>
                 <div style={{ fontFamily: "Arial, sans-serif", fontSize: 13, lineHeight: 1.45, color: "#11284d" }}>
                   <strong style={{ color: "#0b2f85" }}>{unit.vehicle}</strong>

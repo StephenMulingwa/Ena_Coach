@@ -14,6 +14,7 @@ import {
 import { BusFront } from "lucide-react";
 import PageHeader from "./PageHeader";
 import DateFilter from "./DateFilter";
+import ChartBox from "./ChartBox";
 import { CategoryAxisTick } from "./CategoryAxisTick";
 import { useMediaQuery } from "../lib/useMediaQuery";
 import { LAYOUT_NARROW_QUERY } from "../lib/breakpoints";
@@ -687,8 +688,10 @@ export default function DriverEvaluation({
               Violation Breakdown
             </div>
             <div className="tab-chart-scroll tab-chart-scroll--dashboard-chart" style={{ width: "100%", minWidth: 0 }}>
-              <div style={{ height: narrow ? 280 : 300, padding: "10px 14px 4px", minWidth: violationChartMinW, width: "100%" }}>
-                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={200} debounce={80}>
+              <div style={{ padding: "10px 14px 4px", minWidth: violationChartMinW, width: "100%" }}>
+                <ChartBox height={narrow ? 280 : 300} minHeight={200}>
+                  {(size) => (
+                    <ResponsiveContainer width={size.width} height={size.height} debounce={80}>
                   <BarChart data={violationBreakdown} margin={{ top: 8, right: 8, left: 0, bottom: 52 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#e5ecff" />
                     <XAxis
@@ -720,7 +723,9 @@ export default function DriverEvaluation({
                       ))}
                     </Bar>
                   </BarChart>
-                </ResponsiveContainer>
+                    </ResponsiveContainer>
+                  )}
+                </ChartBox>
               </div>
             </div>
           </div>

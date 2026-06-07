@@ -55,7 +55,7 @@ export default function AppShell({ onLogout, initialData = null }: AppShellProps
   const [runNonce, setRunNonce] = useState(0);
   const { data, loading, error } = useWialonData(appliedRange, {
     initialData,
-    skipInitialFetch: initialData != null,
+    skipInitialFetch: Boolean(initialData),
     refreshNonce: runNonce,
   });
 

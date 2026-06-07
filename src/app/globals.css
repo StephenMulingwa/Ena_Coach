@@ -717,6 +717,25 @@ body::before {
   }
 }
 
+.fleet-map-label.leaflet-tooltip {
+  background: rgba(11, 47, 133, 0.94);
+  color: #fff;
+  border: 1px solid rgba(245, 179, 0, 0.55);
+  font-family: var(--font-head);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(11, 47, 133, 0.25);
+  white-space: nowrap;
+}
+.fleet-map-label.leaflet-tooltip-left::before {
+  border-left-color: rgba(11, 47, 133, 0.94);
+}
+.fleet-map-label.leaflet-tooltip-right::before {
+  border-right-color: rgba(11, 47, 133, 0.94);
+}
+
 /* Leaflet map (Reports → Map) */
 .leaflet-container {
   font-family: var(--font-body);

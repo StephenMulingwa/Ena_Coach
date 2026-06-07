@@ -4,6 +4,8 @@ import { useEffect } from "react";
 
 export default function ServiceWorkerRegister() {
   useEffect(() => {
+    // PWA service worker interferes with Next.js dev HMR; only register in production.
+    if (process.env.NODE_ENV !== "production") return;
     if (typeof window === "undefined" || !("serviceWorker" in navigator)) return;
 
     const register = async () => {

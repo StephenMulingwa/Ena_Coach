@@ -13,6 +13,7 @@ import {
 } from "recharts";
 import PageHeader from "./PageHeader";
 import DateFilter from "./DateFilter";
+import ChartBox from "./ChartBox";
 import { CategoryAxisTick } from "./CategoryAxisTick";
 import { useMediaQuery } from "../lib/useMediaQuery";
 import { LAYOUT_NARROW_QUERY } from "../lib/breakpoints";
@@ -192,8 +193,10 @@ export default function Dashboard({
             className="tab-chart-scroll tab-chart-scroll--dashboard-chart tab-chart-scroll--dashboard-isolate"
             style={{ width: "100%", minWidth: 0, maxWidth: "100%" }}
           >
-            <div style={{ height: narrow ? 300 : 330, padding: "10px 14px 4px", minWidth: violationsChartMinW, width: "100%" }}>
-              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={220} debounce={80}>
+            <div style={{ padding: "10px 14px 4px", minWidth: violationsChartMinW, width: "100%" }}>
+              <ChartBox height={narrow ? 300 : 330} minHeight={220}>
+                {(size) => (
+                  <ResponsiveContainer width={size.width} height={size.height} debounce={80}>
                 <BarChart data={violationSummary} margin={{ top: 8, right: 8, left: 0, bottom: 52 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e5ecff" />
                   <XAxis
@@ -219,7 +222,9 @@ export default function Dashboard({
                     ))}
                   </Bar>
                 </BarChart>
-              </ResponsiveContainer>
+                  </ResponsiveContainer>
+                )}
+              </ChartBox>
             </div>
           </div>
         </div>

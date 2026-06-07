@@ -5,7 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 
 interface LoginProps {
-  onLogin: () => void | Promise<void>;
+  onLogin: () => Promise<void>;
 }
 
 const HERO_TAGS = [
@@ -641,7 +641,7 @@ export default function Login({ onLogin }: LoginProps) {
                     color: "var(--text2)",
                   }}
                 >
-                  {["Verifying credentials", "Opening fleet portal", "Preparing dashboard"].map(
+                  {["Verifying credentials", "Loading live positions", "Loading fleet reports"].map(
                     (label, idx) => {
                       const done = progressStep > idx;
                       const active = progressStep === idx;
