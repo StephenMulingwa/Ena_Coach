@@ -1,13 +1,14 @@
 "use client";
 
 import { useState, type CSSProperties } from "react";
-import { ArrowLeft, ClipboardList, Droplets, FileBarChart2, Gauge } from "lucide-react";
+import { ArrowLeft, ClipboardList, Droplets, FileBarChart2, Gauge, MapPin } from "lucide-react";
 import { type SharedTabProps } from "../lib/data";
 import Fuel from "./Fuel";
 import SummaryReport from "./reports/SummaryReport";
 import SpeedMonitoringReport from "./reports/SpeedMonitoringReport";
+import MapReport from "./reports/MapReport";
 
-type ReportId = "fuel" | "speed" | "summary";
+type ReportId = "fuel" | "speed" | "summary" | "map";
 
 interface ReportCardConfig {
   id: ReportId;
@@ -50,6 +51,16 @@ const REPORT_CARDS: ReportCardConfig[] = [
     iconBackground: "rgba(225,29,72,0.16)",
     cardBackground: "linear-gradient(135deg, #ffe9ee 0%, #fff2f5 100%)",
     borderColor: "rgba(225,29,72,0.18)",
+  },
+  {
+    id: "map",
+    title: "Map",
+    description: "Live positions of all fleet vehicles on an interactive map",
+    Icon: MapPin,
+    iconColor: "#0b2f85",
+    iconBackground: "rgba(11,47,133,0.14)",
+    cardBackground: "linear-gradient(135deg, #e8f0ff 0%, #eef5ff 100%)",
+    borderColor: "rgba(11,47,133,0.2)",
   },
 ];
 
@@ -233,6 +244,7 @@ export default function Reports(props: SharedTabProps) {
       {activeReport === "fuel" && <Fuel {...props} />}
       {activeReport === "speed" && <SpeedMonitoringReport {...props} />}
       {activeReport === "summary" && <SummaryReport {...props} />}
+      {activeReport === "map" && <MapReport {...props} />}
     </div>
   );
 }

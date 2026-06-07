@@ -318,6 +318,9 @@ function rowsToSpeedRecords(
   });
 }
 
+/** Allow long-running Wialon report generation (Vercel Pro supports up to 300s). */
+export const maxDuration = 300;
+
 export async function GET(request: Request) {
   try {
     const token = process.env.WIALON_TOKEN;

@@ -717,3 +717,11 @@ body::before {
   }
 }
 
+/* Leaflet map (Reports → Map) */
+.leaflet-container {
+  font-family: var(--font-body);
+}
+.leaflet-popup-content-wrapper {
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+}
